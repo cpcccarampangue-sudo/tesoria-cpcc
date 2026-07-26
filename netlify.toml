@@ -1,0 +1,13 @@
+# Configuración de despliegue en Netlify.
+# El plugin @netlify/plugin-nextjs se instala automáticamente cuando
+# Netlify detecta un proyecto Next.js — no requiere configuración extra.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

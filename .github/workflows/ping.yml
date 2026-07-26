@@ -1,0 +1,23 @@
+name: Ping anti-pausa Supabase
+
+# Cada 3 días hace una consulta trivial para que Supabase no pause el proyecto.
+on:
+  schedule:
+    - cron: "0 12 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "Falta el secreto APP_URL (ej: https://tesoria-cpcc.vercel.app)"
+            exit 1
+          fi
+          curl -fsS "$APP_URL/api/health" || (echo "Health check falló"; exit 1)
+          echo ""
+          echo "Ping OK"
