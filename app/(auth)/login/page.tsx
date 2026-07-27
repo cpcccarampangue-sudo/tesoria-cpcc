@@ -17,8 +17,8 @@ export default function LoginPage() {
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Ingresar</h2>
           <p className="text-sm text-slate-600 mb-4">
-            Escribe tu correo y te enviaremos un enlace mágico para entrar. No
-            necesitas contraseña.
+            Escribe tu correo y te enviaremos un código de 6 dígitos para
+            entrar. No necesitas contraseña.
           </p>
           <LoginForm />
         </div>
