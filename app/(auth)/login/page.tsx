@@ -5,7 +5,7 @@ export const metadata = { title: "Ingresar — Tesorería CPCC" };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; debug?: string }>;
 }) {
   const params = await searchParams;
   return (
@@ -33,6 +33,11 @@ export default async function LoginPage({
           {params.error && (
             <div className="text-sm bg-red-50 text-red-800 rounded-md p-3 mb-4">
               <strong>Error al iniciar sesión:</strong> {params.error}
+            </div>
+          )}
+          {params.debug && (
+            <div className="text-xs bg-amber-50 text-amber-900 rounded-md p-3 mb-4 break-words">
+              <strong>Debug:</strong> {params.debug}
             </div>
           )}
           <LoginForm />

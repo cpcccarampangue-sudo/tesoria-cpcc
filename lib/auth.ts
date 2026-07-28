@@ -29,9 +29,36 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
 }
 
 export async function requireProfile(): Promise<SessionProfile> {
-  const profile = await getSessionProfile();
-  if (!profile) redirect("/login");
-  return profile;
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) {
+    redirect(
+      `/login?debug=${encodeURIComponent("no-user:" + (userErr?.message ?? "sin usuario"))}`
+    );
+  }
+
+  const { data: profile, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, email, nombre, role, apoderado_id, curso_asignado")
+    .eq("id", user.id)
+    .single();
+
+  if (profErr || !profile) {
+    redirect(
+      `/login?debug=${encodeURIComponent(
+        "no-profile:" +
+          (profErr?.message ?? "sin perfil") +
+          " (user.id=" +
+          user.id +
+          ")"
+      )}`
+    );
+  }
+  return profile as SessionProfile;
 }
 
 export async function requireDirectiva(): Promise<SessionProfile> {
