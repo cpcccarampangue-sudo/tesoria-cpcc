@@ -597,6 +597,20 @@ async function runImportFromBytes(
 
   // Cuotas + regalos
   if (periodoId) {
+    // 1) Borrar movimientos vinculados a cuota_pagos de este período (evita duplicados en re-sync)
+    await chunkedInFilter(familiaIds, 150, async (chunk) => {
+      const { data: pagosExistentes } = await admin
+        .from("cuota_pagos")
+        .select("id")
+        .eq("periodo_id", periodoId)
+        .in("apoderado_id", chunk);
+      const pagoIds = (pagosExistentes ?? []).map((p) => p.id);
+      if (pagoIds.length > 0) {
+        await admin.from("movimientos").delete().in("cuota_pago_id", pagoIds);
+      }
+    });
+
+    // 2) Borrar los cuota_pagos existentes de este período
     await chunkedInFilter(familiaIds, 150, async (chunk) => {
       await admin
         .from("cuota_pagos")
@@ -689,7 +703,7 @@ async function runImportFromBytes(
             fam?.fechaInscripcion ?? new Date().toISOString().slice(0, 10),
           tipo: "ingreso",
           monto: p.monto,
-          descripcion: `Cuota ${opts.periodoNombre} — ${fam?.nombre ?? ""}${
+          descripcion: `${opts.periodoNombre} — ${fam?.nombre ?? ""}${
             fam?.comprobante ? ` (comp. ${fam.comprobante})` : ""
           }`,
           categoria_id: catCuota?.id ?? null,
