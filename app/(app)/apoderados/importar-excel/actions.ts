@@ -533,6 +533,21 @@ async function runImportFromBytes(
     });
   }
 
+  // Además: borrar contactos con emails que van a reutilizarse en otras familias
+  // (por importaciones previas con nombres de familia distintos).
+  const emailsNuevos = new Set<string>();
+  for (const fam of familiasArr) {
+    for (const c of fam.contactos.values()) {
+      if (c.email) emailsNuevos.add(c.email);
+    }
+  }
+  if (emailsNuevos.size > 0) {
+    const emailsArr = Array.from(emailsNuevos);
+    await chunkedInFilter(emailsArr, 150, async (chunk) => {
+      await admin.from("contactos").delete().in("email", chunk);
+    });
+  }
+
   // Bulk insert contactos (dedupear emails globalmente)
   const contactosBulk: Record<string, unknown>[] = [];
   const emailsVistos = new Set<string>();
