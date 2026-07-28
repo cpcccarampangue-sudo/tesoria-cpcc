@@ -2,15 +2,22 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { actualizarApoderado, type EstudianteInput } from "../actions";
+import {
+  actualizarApoderado,
+  type EstudianteInput,
+  type ContactoInput,
+} from "../actions";
 import { EstudiantesEditor } from "@/components/estudiantes-editor";
-import type { Apoderado, Estudiante } from "@/lib/types";
+import { ContactosEditor } from "@/components/contactos-editor";
+import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
 
 export function EditarApoderadoForm({
   apoderado,
+  contactos,
   estudiantes,
 }: {
   apoderado: Apoderado;
+  contactos: Contacto[];
   estudiantes: Estudiante[];
 }) {
   const router = useRouter();
@@ -19,10 +26,18 @@ export function EditarApoderadoForm({
   const [ok, setOk] = useState(false);
   const [form, setForm] = useState({
     nombre: apoderado.nombre,
-    email: apoderado.email ?? "",
-    telefono: apoderado.telefono ?? "",
     activo: apoderado.activo,
+    socio: apoderado.socio,
   });
+  const [cts, setCts] = useState<ContactoInput[]>(
+    contactos.map((c) => ({
+      id: c.id,
+      nombre: c.nombre,
+      email: c.email,
+      telefono: c.telefono,
+      relacion: c.relacion,
+    }))
+  );
   const [ests, setEsts] = useState<EstudianteInput[]>(
     estudiantes.map((e) => ({ id: e.id, nombre: e.nombre, curso: e.curso }))
   );
@@ -32,16 +47,16 @@ export function EditarApoderadoForm({
     setError(null);
     setOk(false);
     if (!form.nombre.trim()) {
-      setError("El nombre es obligatorio.");
+      setError("El nombre de la familia es obligatorio.");
       return;
     }
     startTransition(async () => {
       try {
         await actualizarApoderado(apoderado.id, {
           nombre: form.nombre,
-          email: form.email,
-          telefono: form.telefono,
           activo: form.activo,
+          socio: form.socio,
+          contactos: cts,
           estudiantes: ests,
         });
         setOk(true);
@@ -51,52 +66,47 @@ export function EditarApoderadoForm({
     });
   }
 
-  function upd<K extends "nombre" | "email" | "telefono">(k: K, v: string) {
-    setForm((f) => ({ ...f, [k]: v }));
-  }
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="label">Nombre completo *</label>
+        <label className="label">Nombre de la familia *</label>
         <input
           className="input"
           value={form.nombre}
-          onChange={(e) => upd("nombre", e.target.value)}
+          onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
           required
         />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="label">Email</label>
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 text-sm">
           <input
-            type="email"
-            className="input"
-            value={form.email}
-            onChange={(e) => upd("email", e.target.value)}
+            type="checkbox"
+            checked={form.activo}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, activo: e.target.checked }))
+            }
           />
-        </div>
-        <div>
-          <label className="label">Teléfono</label>
+          Familia activa
+        </label>
+        <label className="flex items-center gap-2 text-sm">
           <input
-            className="input"
-            value={form.telefono}
-            onChange={(e) => upd("telefono", e.target.value)}
+            type="checkbox"
+            checked={form.socio}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, socio: e.target.checked }))
+            }
           />
-        </div>
+          Socio del CdP
+        </label>
       </div>
       <div>
-        <label className="label">Hijos (estudiantes)</label>
+        <label className="label">Contactos</label>
+        <ContactosEditor value={cts} onChange={setCts} />
+      </div>
+      <div>
+        <label className="label">Estudiantes (hijos)</label>
         <EstudiantesEditor value={ests} onChange={setEsts} />
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={form.activo}
-          onChange={(e) => setForm((f) => ({ ...f, activo: e.target.checked }))}
-        />
-        Apoderado activo
-      </label>
       {error && (
         <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
           {error}

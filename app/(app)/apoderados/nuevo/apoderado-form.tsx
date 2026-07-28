@@ -2,8 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { crearApoderado, type EstudianteInput } from "../actions";
+import {
+  crearApoderado,
+  type EstudianteInput,
+  type ContactoInput,
+} from "../actions";
 import { EstudiantesEditor } from "@/components/estudiantes-editor";
+import { ContactosEditor } from "@/components/contactos-editor";
 
 export function ApoderadoForm() {
   const router = useRouter();
@@ -11,21 +16,26 @@ export function ApoderadoForm() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     nombre: "",
-    email: "",
-    telefono: "",
+    socio: true,
   });
+  const [contactos, setContactos] = useState<ContactoInput[]>([]);
   const [estudiantes, setEstudiantes] = useState<EstudianteInput[]>([]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!form.nombre.trim()) {
-      setError("El nombre es obligatorio.");
+      setError("El nombre de la familia es obligatorio.");
       return;
     }
     startTransition(async () => {
       try {
-        await crearApoderado({ ...form, estudiantes });
+        await crearApoderado({
+          nombre: form.nombre,
+          socio: form.socio,
+          contactos,
+          estudiantes,
+        });
         router.push("/apoderados");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
@@ -33,43 +43,32 @@ export function ApoderadoForm() {
     });
   }
 
-  function upd<K extends keyof typeof form>(k: K, v: string) {
-    setForm((f) => ({ ...f, [k]: v }));
-  }
-
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="label">Nombre completo *</label>
+        <label className="label">Nombre de la familia *</label>
         <input
           className="input"
           value={form.nombre}
-          onChange={(e) => upd("nombre", e.target.value)}
+          onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
           required
+          placeholder="Ej: Cáceres Pérez"
         />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="label">Email</label>
-          <input
-            type="email"
-            className="input"
-            value={form.email}
-            onChange={(e) => upd("email", e.target.value)}
-            placeholder="opcional (recomendado para vincular su cuenta)"
-          />
-        </div>
-        <div>
-          <label className="label">Teléfono</label>
-          <input
-            className="input"
-            value={form.telefono}
-            onChange={(e) => upd("telefono", e.target.value)}
-          />
-        </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.socio}
+          onChange={(e) => setForm((f) => ({ ...f, socio: e.target.checked }))}
+        />
+        Socio del Centro de Padres
+      </label>
+      <div>
+        <label className="label">Contactos (padre, madre, apoderado...)</label>
+        <ContactosEditor value={contactos} onChange={setContactos} />
       </div>
       <div>
-        <label className="label">Hijos (estudiantes)</label>
+        <label className="label">Estudiantes (hijos)</label>
         <EstudiantesEditor value={estudiantes} onChange={setEstudiantes} />
       </div>
       {error && (
@@ -79,7 +78,7 @@ export function ApoderadoForm() {
       )}
       <div className="flex gap-2">
         <button className="btn-primary" disabled={pending}>
-          {pending ? "Guardando..." : "Guardar"}
+          {pending ? "Guardando..." : "Guardar familia"}
         </button>
         <button
           type="button"

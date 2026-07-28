@@ -7,7 +7,15 @@
 -- === ENUMS ===
 do $$ begin
   if not exists (select 1 from pg_type where typname = 'user_role') then
-    create type user_role as enum ('directiva', 'apoderado');
+    create type user_role as enum ('directiva', 'delegado', 'apoderado');
+  end if;
+  -- Si el enum ya existía sin 'delegado', lo agregamos.
+  if not exists (
+    select 1 from pg_enum e
+    join pg_type t on t.oid = e.enumtypid
+    where t.typname = 'user_role' and e.enumlabel = 'delegado'
+  ) then
+    alter type user_role add value if not exists 'delegado' before 'apoderado';
   end if;
   if not exists (select 1 from pg_type where typname = 'mov_tipo') then
     create type mov_tipo as enum ('ingreso', 'egreso');
@@ -15,20 +23,39 @@ do $$ begin
   if not exists (select 1 from pg_type where typname = 'cuota_estado') then
     create type cuota_estado as enum ('pendiente', 'pagada', 'parcial', 'exenta');
   end if;
+  if not exists (select 1 from pg_type where typname = 'contacto_relacion') then
+    create type contacto_relacion as enum ('padre', 'madre', 'apoderado_cuenta', 'apoderado_academico', 'otro');
+  end if;
 end $$;
 
--- === APODERADOS (creado antes de profiles porque profiles tiene FK a él) ===
+-- === APODERADOS (la "familia" — unidad de cobro de cuota) ===
+-- El campo `nombre` es el rótulo de la familia (ej. "Familia Cáceres Pérez").
+-- Los datos de contacto (email, telefono) van en la tabla `contactos`.
 create table if not exists apoderados (
   id uuid primary key default gen_random_uuid(),
   nombre text not null,
-  email text unique,
+  activo boolean not null default true,
+  socio boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_apoderados_socio on apoderados (socio);
+
+-- === CONTACTOS (padre/madre/tutor de la familia; puede haber varios) ===
+create table if not exists contactos (
+  id uuid primary key default gen_random_uuid(),
+  apoderado_id uuid not null references apoderados(id) on delete cascade,
+  nombre text not null,
+  email text,
   telefono text,
+  relacion contacto_relacion not null default 'otro',
   activo boolean not null default true,
   created_at timestamptz not null default now()
 );
-create index if not exists idx_apoderados_email on apoderados (lower(email));
+create unique index if not exists idx_contactos_email_unique
+  on contactos (lower(email)) where email is not null;
+create index if not exists idx_contactos_apoderado on contactos (apoderado_id);
 
--- === ESTUDIANTES (hijos del apoderado; una familia puede tener varios) ===
+-- === ESTUDIANTES (hijos de la familia; una familia puede tener varios) ===
 create table if not exists estudiantes (
   id uuid primary key default gen_random_uuid(),
   apoderado_id uuid not null references apoderados(id) on delete cascade,
@@ -205,7 +232,11 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_apo_id uuid;
 begin
-  select id into v_apo_id from apoderados where lower(email) = lower(new.email);
+  select c.apoderado_id into v_apo_id
+  from contactos c
+  where lower(c.email) = lower(new.email) and c.activo
+  limit 1;
+
   insert into profiles (id, email, role, apoderado_id)
   values (new.id, new.email, 'apoderado', v_apo_id)
   on conflict (id) do nothing;

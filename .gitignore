@@ -1,5 +1,8 @@
 # deps
 node_modules/
+
+# dev-only scripts
+_scripts/
 .pnp
 .pnp.js
 

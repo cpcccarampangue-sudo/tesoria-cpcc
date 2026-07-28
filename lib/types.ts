@@ -1,14 +1,40 @@
 // Tipos de dominio compartidos entre server y cliente.
 
-export type UserRole = "directiva" | "apoderado";
+export type UserRole = "directiva" | "delegado" | "apoderado";
 export type MovTipo = "ingreso" | "egreso";
 export type CuotaEstado = "pendiente" | "pagada" | "parcial" | "exenta";
+export type ContactoRelacion =
+  | "padre"
+  | "madre"
+  | "apoderado_cuenta"
+  | "apoderado_academico"
+  | "otro";
 
+export const RELACION_LABELS: Record<ContactoRelacion, string> = {
+  padre: "Padre",
+  madre: "Madre",
+  apoderado_cuenta: "Apoderado de cuenta",
+  apoderado_academico: "Apoderado académico",
+  otro: "Otro",
+};
+
+// "Apoderado" en la DB representa la FAMILIA (unidad de cobro de cuota).
+// Los contactos individuales (padre/madre/tutor) están en la tabla `contactos`.
 export type Apoderado = {
   id: string;
   nombre: string;
+  activo: boolean;
+  socio: boolean;
+  created_at: string;
+};
+
+export type Contacto = {
+  id: string;
+  apoderado_id: string;
+  nombre: string;
   email: string | null;
   telefono: string | null;
+  relacion: ContactoRelacion;
   activo: boolean;
   created_at: string;
 };

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireProfile } from "@/lib/auth";
+import Image from "next/image";
+import { requireProfile, roleLabel } from "@/lib/auth";
 import { NavLink } from "@/components/nav-link";
 
 export default async function AppLayout({
@@ -15,26 +16,40 @@ export default async function AppLayout({
     { href: "/movimientos", label: "Movimientos" },
     { href: "/cuotas", label: "Cuotas" },
     { href: "/eventos", label: "Eventos" },
-    { href: "/apoderados", label: "Apoderados" },
+    { href: "/apoderados", label: "Familias" },
     { href: "/categorias", label: "Categorías" },
     { href: "/reportes", label: "Reportes" },
   ];
 
-  const navApoderado = [
+  const navBasico = [
     { href: "/dashboard", label: "Inicio" },
     { href: "/cuotas", label: "Mis cuotas" },
     { href: "/eventos", label: "Eventos" },
   ];
 
-  const nav = esDirectiva ? navDirectiva : navApoderado;
+  const nav = esDirectiva ? navDirectiva : navBasico;
+
+  const badgeClass =
+    profile.role === "directiva"
+      ? "badge-blue"
+      : profile.role === "delegado"
+      ? "badge-amber"
+      : "badge-slate";
 
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="text-brand-600 text-xl font-bold">₡</span>
-            <span className="font-semibold text-slate-900">
+            <Image
+              src="/logo.png"
+              alt="CPCC"
+              width={36}
+              height={36}
+              className="rounded"
+              priority
+            />
+            <span className="font-semibold text-slate-900 hidden sm:inline">
               Tesorería CPCC
             </span>
           </Link>
@@ -46,11 +61,11 @@ export default async function AppLayout({
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-600 hidden sm:inline">
+            <span className="text-sm text-slate-600 hidden md:inline">
               {profile.email}
-              {esDirectiva && (
-                <span className="badge-blue ml-2">Directiva</span>
-              )}
+              <span className={`ml-2 ${badgeClass}`}>
+                {roleLabel(profile.role)}
+              </span>
             </span>
             <form action="/logout" method="post">
               <button type="submit" className="btn-secondary text-xs">
@@ -64,7 +79,7 @@ export default async function AppLayout({
         {children}
       </main>
       <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500">
-        Tesorería CPCC — {new Date().getFullYear()}
+        Tesorería CPCC — Colegio Carampangue · {new Date().getFullYear()}
       </footer>
     </div>
   );

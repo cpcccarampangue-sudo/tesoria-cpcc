@@ -6,27 +6,29 @@ import { useState } from "react";
 export function ApoderadosSearch({
   initialQ,
   initialCurso,
+  initialSocio,
   cursos,
 }: {
   initialQ: string;
   initialCurso: string;
+  initialSocio: string;
   cursos: string[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
   const [q, setQ] = useState(initialQ);
   const [curso, setCurso] = useState(initialCurso);
+  const [socio, setSocio] = useState(initialSocio);
 
-  function apply(next: { q?: string; curso?: string }) {
+  function apply(next: { q?: string; curso?: string; socio?: string }) {
     const sp = new URLSearchParams(params.toString());
-    if (next.q !== undefined) {
-      if (next.q) sp.set("q", next.q);
-      else sp.delete("q");
-    }
-    if (next.curso !== undefined) {
-      if (next.curso) sp.set("curso", next.curso);
-      else sp.delete("curso");
-    }
+    (["q", "curso", "socio"] as const).forEach((k) => {
+      const v = next[k];
+      if (v !== undefined) {
+        if (v) sp.set(k, v);
+        else sp.delete(k);
+      }
+    });
     router.push(`/apoderados?${sp.toString()}`);
   }
 
@@ -34,21 +36,21 @@ export function ApoderadosSearch({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        apply({ q, curso });
+        apply({ q, curso, socio });
       }}
-      className="grid grid-cols-1 sm:grid-cols-4 gap-3"
+      className="grid grid-cols-1 sm:grid-cols-5 gap-3"
     >
       <div className="sm:col-span-2">
-        <label className="label">Buscar por nombre</label>
+        <label className="label">Buscar por familia</label>
         <input
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Ej: Juan Pérez"
+          placeholder="Ej: Cáceres"
         />
       </div>
       <div>
-        <label className="label">Curso</label>
+        <label className="label">Curso (hijos)</label>
         <select
           className="input"
           value={curso}
@@ -65,18 +67,34 @@ export function ApoderadosSearch({
           ))}
         </select>
       </div>
+      <div>
+        <label className="label">Socio</label>
+        <select
+          className="input"
+          value={socio}
+          onChange={(e) => {
+            setSocio(e.target.value);
+            apply({ socio: e.target.value });
+          }}
+        >
+          <option value="">Todos</option>
+          <option value="si">Socios</option>
+          <option value="no">No socios</option>
+        </select>
+      </div>
       <div className="flex items-end gap-2">
         <button type="submit" className="btn-primary">
           Buscar
         </button>
-        {(q || curso) && (
+        {(q || curso || socio) && (
           <button
             type="button"
             className="btn-secondary"
             onClick={() => {
               setQ("");
               setCurso("");
-              apply({ q: "", curso: "" });
+              setSocio("");
+              apply({ q: "", curso: "", socio: "" });
             }}
           >
             Limpiar

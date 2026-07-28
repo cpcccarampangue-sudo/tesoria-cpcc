@@ -12,11 +12,17 @@ export default async function LoginPage({
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-slate-900">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="Centro de Padres Colegio Carampangue"
+            className="mx-auto h-24 w-auto mb-3"
+          />
+          <h1 className="text-xl font-semibold text-slate-900">
             Tesorería CPCC
           </h1>
           <p className="text-sm text-slate-600 mt-1">
-            Centro de Padres — sistema de cuentas
+            Colegio Carampangue — sistema de cuentas
           </p>
         </div>
         <div className="card">

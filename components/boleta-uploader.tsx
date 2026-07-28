@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-// Sube la boleta a Storage y devuelve el path. Recomienda pasarle un id
-// (movimiento_id o UUID temporal) para agrupar en carpetas por año/mes.
+// Sube la boleta a Storage y devuelve el path. Muestra dos opciones:
+//   - "Tomar foto" (abre la cámara del celular directamente)
+//   - "Adjuntar archivo" (abre selector de archivos o galería)
 export function BoletaUploader({
   value,
   onChange,
@@ -17,13 +18,14 @@ export function BoletaUploader({
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cameraRef = useRef<HTMLInputElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   async function handleFile(file: File) {
     setError(null);
     setUploading(true);
     try {
       let toUpload: File = file;
-      // Comprimir solo imágenes; PDFs se suben tal cual.
       if (file.type.startsWith("image/")) {
         toUpload = await imageCompression(file, {
           maxSizeMB: 1,
@@ -78,16 +80,51 @@ export function BoletaUploader({
           </button>
         </div>
       ) : (
-        <input
-          type="file"
-          accept="image/*,application/pdf"
-          disabled={uploading}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleFile(f);
-          }}
-          className="text-sm"
-        />
+        <>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              disabled={uploading}
+              onClick={() => cameraRef.current?.click()}
+            >
+              📷 Tomar foto
+            </button>
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              disabled={uploading}
+              onClick={() => fileRef.current?.click()}
+            >
+              📎 Adjuntar archivo
+            </button>
+          </div>
+          {/* input oculto: solo cámara del celular (capture=environment fuerza la trasera) */}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
+          {/* input oculto: cualquier archivo (galería, PDFs, etc.) */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleFile(f);
+              e.target.value = "";
+            }}
+          />
+        </>
       )}
       {uploading && (
         <div className="text-xs text-slate-500">Subiendo, un momento...</div>

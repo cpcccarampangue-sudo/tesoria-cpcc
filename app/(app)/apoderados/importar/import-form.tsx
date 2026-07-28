@@ -67,8 +67,10 @@ export function ImportForm() {
       {result && (
         <div className="text-sm bg-green-50 text-green-900 rounded-md p-3 space-y-1">
           <div>Filas procesadas: {result.filas}</div>
-          <div>Insertados: {result.insertados}</div>
-          <div>Actualizados: {result.actualizados}</div>
+          <div>Familias insertadas: {result.insertados}</div>
+          <div>Familias actualizadas: {result.actualizados}</div>
+          <div>Contactos cargados: {result.contactosInsertados}</div>
+          <div>Estudiantes cargados: {result.estudiantesInsertados}</div>
           {result.errores.length > 0 && (
             <>
               <div className="font-semibold text-red-800 mt-2">

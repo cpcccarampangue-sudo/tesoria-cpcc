@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import type { Apoderado, Estudiante } from "@/lib/types";
+import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
+import { RELACION_LABELS } from "@/lib/types";
 import { toggleActivo, eliminarApoderado } from "./actions";
 
 export function ApoderadoRow({
   a,
+  contactos,
   estudiantes,
   altaLabel,
 }: {
   a: Apoderado;
+  contactos: Contacto[];
   estudiantes: Estudiante[];
   altaLabel: string;
 }) {
@@ -28,6 +31,32 @@ export function ApoderadoRow({
         </Link>
       </td>
       <td className="table-td">
+        {a.socio ? (
+          <span className="badge-green">Socio</span>
+        ) : (
+          <span className="badge-slate">No socio</span>
+        )}
+      </td>
+      <td className="table-td">
+        {contactos.length === 0 ? (
+          <span className="text-slate-400">—</span>
+        ) : (
+          <div className="space-y-0.5">
+            {contactos.map((c) => (
+              <div key={c.id} className="text-xs">
+                <span className="text-slate-500">
+                  {RELACION_LABELS[c.relacion]}:
+                </span>{" "}
+                <span className="font-medium">{c.nombre}</span>
+                {c.email && (
+                  <span className="text-slate-500"> · {c.email}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </td>
+      <td className="table-td">
         {estudiantes.length === 0 ? (
           <span className="text-slate-400">—</span>
         ) : (
@@ -43,8 +72,6 @@ export function ApoderadoRow({
           </div>
         )}
       </td>
-      <td className="table-td">{a.email ?? "—"}</td>
-      <td className="table-td">{a.telefono ?? "—"}</td>
       <td className="table-td">{altaLabel}</td>
       <td className="table-td text-right">
         <div className="flex items-center justify-end gap-2">

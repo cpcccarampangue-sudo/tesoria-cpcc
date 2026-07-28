@@ -4,42 +4,42 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatFecha } from "@/lib/formatters";
 import { ApoderadosSearch } from "./apoderados-search";
 import { ApoderadoRow } from "./apoderado-row";
-import type { Apoderado, Estudiante } from "@/lib/types";
+import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
 
-export const metadata = { title: "Apoderados — Tesorería CPCC" };
+export const metadata = { title: "Familias — Tesorería CPCC" };
 
 export default async function ApoderadosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; curso?: string }>;
+  searchParams: Promise<{ q?: string; curso?: string; socio?: string }>;
 }) {
   await requireDirectiva();
   const params = await searchParams;
   const q = (params.q ?? "").trim();
   const curso = (params.curso ?? "").trim();
+  const socio = (params.socio ?? "").trim(); // "si", "no", ""
 
   const supabase = await createSupabaseServerClient();
 
-  // Traer apoderados con sus estudiantes
   let query = supabase
     .from("apoderados")
-    .select("*, estudiantes(*)")
+    .select("*, contactos(*), estudiantes(*)")
     .order("nombre", { ascending: true })
-    .limit(500);
+    .limit(1000);
   if (q) query = query.ilike("nombre", `%${q}%`);
+  if (socio === "si") query = query.eq("socio", true);
+  if (socio === "no") query = query.eq("socio", false);
   const { data: raw } = await query;
 
-  type Row = Apoderado & { estudiantes: Estudiante[] };
+  type Row = Apoderado & { contactos: Contacto[]; estudiantes: Estudiante[] };
   let apoderados = (raw as Row[] | null) ?? [];
 
-  // Filtro por curso: en cliente (RLS ya trajo todo)
   if (curso) {
     apoderados = apoderados.filter((a) =>
       (a.estudiantes ?? []).some((e) => e.curso === curso)
     );
   }
 
-  // Todos los cursos posibles para el <select>
   const { data: cursosRaw } = await supabase
     .from("estudiantes")
     .select("curso")
@@ -49,42 +49,52 @@ export default async function ApoderadosPage({
     new Set((cursosRaw ?? []).map((c) => c.curso).filter(Boolean) as string[])
   ).sort();
 
+  const totalSocios = apoderados.filter((a) => a.socio).length;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Apoderados</h1>
+          <h1 className="text-2xl font-semibold">Familias</h1>
           <p className="text-sm text-slate-600">
-            {apoderados.length} apoderado(s) mostrados
+            {apoderados.length} familia(s) mostradas · {totalSocios} socias
           </p>
         </div>
         <div className="flex gap-2">
           <Link href="/apoderados/nuevo" className="btn-secondary">
-            + Nuevo
+            + Nueva familia
           </Link>
-          <Link href="/apoderados/importar" className="btn-primary">
+          <Link href="/apoderados/importar" className="btn-secondary">
             Importar CSV
+          </Link>
+          <Link href="/apoderados/importar-excel" className="btn-primary">
+            Importar Excel colegio
           </Link>
         </div>
       </div>
 
       <div className="card">
-        <ApoderadosSearch initialQ={q} initialCurso={curso} cursos={cursos} />
+        <ApoderadosSearch
+          initialQ={q}
+          initialCurso={curso}
+          initialSocio={socio}
+          cursos={cursos}
+        />
       </div>
 
       {apoderados.length === 0 ? (
         <div className="card text-sm text-slate-500">
-          No hay apoderados que coincidan.
+          No hay familias que coincidan.
         </div>
       ) : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full">
             <thead className="bg-slate-50">
               <tr>
-                <th className="table-th">Nombre</th>
+                <th className="table-th">Familia</th>
+                <th className="table-th">Socio</th>
+                <th className="table-th">Contactos</th>
                 <th className="table-th">Hijos</th>
-                <th className="table-th">Email</th>
-                <th className="table-th">Teléfono</th>
                 <th className="table-th">Alta</th>
                 <th className="table-th"></th>
               </tr>
@@ -94,6 +104,7 @@ export default async function ApoderadosPage({
                 <ApoderadoRow
                   key={a.id}
                   a={a}
+                  contactos={a.contactos ?? []}
                   estudiantes={a.estudiantes ?? []}
                   altaLabel={formatFecha(a.created_at)}
                 />

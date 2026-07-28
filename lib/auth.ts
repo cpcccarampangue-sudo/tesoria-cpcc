@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "./supabase/server";
-
-export type UserRole = "directiva" | "apoderado";
+import type { UserRole } from "./types";
 
 export type SessionProfile = {
   id: string;
@@ -42,4 +41,15 @@ export async function requireDirectiva(): Promise<SessionProfile> {
 
 export function isDirectiva(profile: SessionProfile | null): boolean {
   return profile?.role === "directiva";
+}
+
+export function roleLabel(role: UserRole): string {
+  switch (role) {
+    case "directiva":
+      return "Directiva";
+    case "delegado":
+      return "Delegado";
+    case "apoderado":
+      return "Apoderado";
+  }
 }
