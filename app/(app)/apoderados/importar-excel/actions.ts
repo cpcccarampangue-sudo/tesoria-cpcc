@@ -700,6 +700,79 @@ async function runImportFromBytes(
     await chunkedInsert(admin, "movimientos", movimientosBulk);
     result.cuotasPagadas = movimientosBulk.length;
     result.regalosRegistrados = pagosCreados.filter((p) => p.regalo_valor > 0).length;
+
+    // Egreso automático agregado: total de regalos entregados al colegio.
+    if (opts.regaloEnabled) {
+      const totalNormal = familiasArr
+        .filter(
+          (f) =>
+            f.socio &&
+            f.tieneAgendaMarcada &&
+            !f.tienePrescolar &&
+            opts.regaloValorNormal > 0
+        )
+        .length;
+      const totalPre = familiasArr
+        .filter(
+          (f) =>
+            f.socio &&
+            f.tieneAgendaMarcada &&
+            f.tienePrescolar &&
+            opts.regaloValorPrescolar > 0
+        )
+        .length;
+      const totalEgreso =
+        totalNormal * opts.regaloValorNormal +
+        totalPre * opts.regaloValorPrescolar;
+
+      if (totalEgreso > 0) {
+        // Asegurar categoría "Pago agendas colegio"
+        let catAgendasId: string | null = null;
+        const { data: catEx } = await admin
+          .from("categorias")
+          .select("id")
+          .eq("nombre", "Pago agendas colegio")
+          .maybeSingle();
+        if (catEx) {
+          catAgendasId = catEx.id;
+        } else {
+          const { data: catNueva } = await admin
+            .from("categorias")
+            .insert({
+              nombre: "Pago agendas colegio",
+              tipo: "egreso",
+              activa: true,
+            })
+            .select("id")
+            .single();
+          catAgendasId = catNueva?.id ?? null;
+        }
+
+        const descPrefix = `AUTO — Agendas ${opts.periodoNombre}`;
+        const desc = `${descPrefix}: ${totalNormal} normales × $${opts.regaloValorNormal.toLocaleString(
+          "es-CL"
+        )} + ${totalPre} preescolares × $${opts.regaloValorPrescolar.toLocaleString(
+          "es-CL"
+        )}`;
+
+        // Borrar egreso auto previo del mismo período
+        await admin
+          .from("movimientos")
+          .delete()
+          .eq("tipo", "egreso")
+          .like("descripcion", `${descPrefix}%`);
+
+        // Insertar el nuevo egreso agregado
+        await admin.from("movimientos").insert({
+          fecha: new Date().toISOString().slice(0, 10),
+          tipo: "egreso",
+          monto: totalEgreso,
+          descripcion: desc,
+          categoria_id: catAgendasId,
+          created_by: profile.id,
+        });
+      }
+    }
   }
 
   revalidatePath("/apoderados");
