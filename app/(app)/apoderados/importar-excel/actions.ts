@@ -100,6 +100,30 @@ async function chunkedInsert(
 export async function importarExcelFamilias(
   formData: FormData
 ): Promise<ExcelImportResult> {
+  try {
+    return await runImport(formData);
+  } catch (err) {
+    // Envolver cualquier error crítico para que llegue al cliente
+    // en vez de aparecer como "Server Components render error".
+    const msg =
+      err instanceof Error
+        ? `${err.message}${err.stack ? "\n" + err.stack.split("\n").slice(0, 3).join("\n") : ""}`
+        : String(err);
+    return {
+      familiasProcesadas: 0,
+      familiasCreadas: 0,
+      familiasActualizadas: 0,
+      contactosCreados: 0,
+      estudiantesCreados: 0,
+      cuotasPeriodoId: null,
+      cuotasCreadas: 0,
+      cuotasPagadas: 0,
+      errores: [`CRÍTICO: ${msg}`],
+    };
+  }
+}
+
+async function runImport(formData: FormData): Promise<ExcelImportResult> {
   const profile = await requireDirectiva();
   const admin = createSupabaseAdminClient();
 
