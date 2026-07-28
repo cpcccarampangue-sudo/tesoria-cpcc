@@ -7,6 +7,8 @@ import { ApoderadoRow } from "./apoderado-row";
 import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
 
 export const metadata = { title: "Familias — Tesorería CPCC" };
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function ApoderadosPage({
   searchParams,

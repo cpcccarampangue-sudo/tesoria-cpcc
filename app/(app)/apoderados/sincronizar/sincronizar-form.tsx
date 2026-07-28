@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { sincronizarDesdeGoogleSheets } from "../importar-excel/actions";
 import type { ExcelImportResult } from "../importar-excel/actions";
 import { parseCLPInput, formatNumber } from "@/lib/formatters";
@@ -8,6 +9,7 @@ import { parseCLPInput, formatNumber } from "@/lib/formatters";
 const LS_KEY = "tesoria-cpcc-sheet-url";
 
 export function SincronizarForm() {
+  const router = useRouter();
   const [sheetUrl, setSheetUrl] = useState("");
   const [periodoNombre, setPeriodoNombre] = useState("Cuota Anual 2026");
   const [monto, setMonto] = useState("27000");
@@ -62,6 +64,7 @@ export function SincronizarForm() {
         fd.append("regaloValorPrescolar", String(regaloValorPreNum ?? 0));
         const r = await sincronizarDesdeGoogleSheets(fd);
         setResult(r);
+        router.refresh(); // fuerza refresh de RSC cache
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
       }

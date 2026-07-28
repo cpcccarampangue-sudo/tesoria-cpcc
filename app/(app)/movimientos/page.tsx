@@ -5,6 +5,8 @@ import { formatCLP, formatFecha } from "@/lib/formatters";
 import { MovimientosFilters } from "./movimientos-filters";
 
 export const metadata = { title: "Movimientos — Tesorería CPCC" };
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type MovimientoRow = {
   id: string;

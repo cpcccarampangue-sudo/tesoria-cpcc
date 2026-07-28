@@ -5,6 +5,8 @@ import { formatCLP, formatFecha } from "@/lib/formatters";
 import type { BalancePorEvento } from "@/lib/types";
 
 export const metadata = { title: "Eventos — Tesorería CPCC" };
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function EventosPage() {
   const profile = await requireProfile();

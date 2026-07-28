@@ -6,6 +6,8 @@ import type { CuotaEstadoApoderado, CuotaPeriodo } from "@/lib/types";
 import { PagoDialog } from "./pago-dialog";
 
 export const metadata = { title: "Cuotas — Tesorería CPCC" };
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function CuotasPage() {
   const profile = await requireProfile();
