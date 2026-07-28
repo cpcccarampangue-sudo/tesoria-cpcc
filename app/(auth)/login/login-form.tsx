@@ -29,8 +29,8 @@ export function LoginForm() {
           password: pwd,
         });
         if (error) throw error;
-        router.push("/dashboard");
-        router.refresh();
+        // Recarga completa para que el servidor lea las cookies nuevas
+        window.location.href = "/dashboard";
       } else {
         if (pwd.length < 8) {
           throw new Error("La contraseña debe tener al menos 8 caracteres.");
@@ -41,8 +41,7 @@ export function LoginForm() {
         });
         if (error) throw error;
         if (data.session) {
-          router.push("/dashboard");
-          router.refresh();
+          window.location.href = "/dashboard";
         } else {
           setMessage({
             type: "ok",
