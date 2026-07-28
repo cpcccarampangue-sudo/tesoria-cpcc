@@ -20,10 +20,9 @@ export default async function LoginPage({
           </p>
         </div>
         <div className="card">
-          <h2 className="text-lg font-semibold mb-4">Ingresar</h2>
           <p className="text-sm text-slate-600 mb-4">
-            Escribe tu correo y te enviaremos un enlace para entrar. No
-            necesitas contraseña.
+            Ingresa con tu correo y contraseña. Si es tu primera vez, crea tu
+            cuenta.
           </p>
           {params.error && (
             <div className="text-sm bg-red-50 text-red-800 rounded-md p-3 mb-4">

@@ -1,10 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export function LoginForm() {
+  const router = useRouter();
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<
     { type: "ok" | "err"; text: string } | null
@@ -16,24 +20,41 @@ export function LoginForm() {
     setMessage(null);
     try {
       const supabase = createSupabaseBrowserClient();
-      const siteUrl =
-        process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
-        options: {
-          emailRedirectTo: `${siteUrl}/auth/callback`,
-        },
-      });
-      if (error) throw error;
-      setMessage({
-        type: "ok",
-        text: "Revisa tu correo. Te enviamos un enlace para ingresar (puede tardar 1-2 minutos y llegar a la carpeta de spam). Abre el correo desde este mismo navegador.",
-      });
-      setEmail("");
+      const emailNorm = email.trim().toLowerCase();
+      const pwd = password.trim();
+
+      if (mode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: emailNorm,
+          password: pwd,
+        });
+        if (error) throw error;
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        if (pwd.length < 8) {
+          throw new Error("La contraseña debe tener al menos 8 caracteres.");
+        }
+        const { data, error } = await supabase.auth.signUp({
+          email: emailNorm,
+          password: pwd,
+        });
+        if (error) throw error;
+        if (data.session) {
+          router.push("/dashboard");
+          router.refresh();
+        } else {
+          setMessage({
+            type: "ok",
+            text: "Cuenta creada. Ahora ingresa con tu correo y contraseña.",
+          });
+          setMode("signin");
+        }
+      }
     } catch (err) {
       setMessage({
         type: "err",
-        text: err instanceof Error ? err.message : "Error al enviar el enlace.",
+        text: err instanceof Error ? err.message : "Error inesperado.",
       });
     } finally {
       setLoading(false);
@@ -42,6 +63,36 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex gap-2 border-b border-slate-200 mb-2">
+        <button
+          type="button"
+          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+            mode === "signin"
+              ? "border-brand-600 text-brand-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+          onClick={() => {
+            setMode("signin");
+            setMessage(null);
+          }}
+        >
+          Ingresar
+        </button>
+        <button
+          type="button"
+          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+            mode === "signup"
+              ? "border-brand-600 text-brand-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+          onClick={() => {
+            setMode("signup");
+            setMessage(null);
+          }}
+        >
+          Crear cuenta
+        </button>
+      </div>
       <div>
         <label htmlFor="email" className="label">
           Correo electrónico
@@ -57,8 +108,28 @@ export function LoginForm() {
           placeholder="tucorreo@ejemplo.cl"
         />
       </div>
+      <div>
+        <label htmlFor="password" className="label">
+          Contraseña
+        </label>
+        <input
+          id="password"
+          type="password"
+          required
+          autoComplete={mode === "signin" ? "current-password" : "new-password"}
+          minLength={mode === "signup" ? 8 : undefined}
+          className="input"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={mode === "signup" ? "Mínimo 8 caracteres" : ""}
+        />
+      </div>
       <button type="submit" className="btn-primary w-full" disabled={loading}>
-        {loading ? "Enviando..." : "Enviar enlace mágico"}
+        {loading
+          ? "Un momento..."
+          : mode === "signin"
+          ? "Ingresar"
+          : "Crear cuenta"}
       </button>
       {message && (
         <div
