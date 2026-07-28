@@ -9,8 +9,15 @@ export type Apoderado = {
   nombre: string;
   email: string | null;
   telefono: string | null;
+  activo: boolean;
+  created_at: string;
+};
+
+export type Estudiante = {
+  id: string;
+  apoderado_id: string;
+  nombre: string;
   curso: string | null;
-  nombre_estudiante: string | null;
   activo: boolean;
   created_at: string;
 };

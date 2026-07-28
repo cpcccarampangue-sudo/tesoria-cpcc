@@ -2,38 +2,56 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { crearApoderado, type EstudianteInput } from "../actions";
+import { actualizarApoderado, type EstudianteInput } from "../actions";
 import { EstudiantesEditor } from "@/components/estudiantes-editor";
+import type { Apoderado, Estudiante } from "@/lib/types";
 
-export function ApoderadoForm() {
+export function EditarApoderadoForm({
+  apoderado,
+  estudiantes,
+}: {
+  apoderado: Apoderado;
+  estudiantes: Estudiante[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
   const [form, setForm] = useState({
-    nombre: "",
-    email: "",
-    telefono: "",
+    nombre: apoderado.nombre,
+    email: apoderado.email ?? "",
+    telefono: apoderado.telefono ?? "",
+    activo: apoderado.activo,
   });
-  const [estudiantes, setEstudiantes] = useState<EstudianteInput[]>([]);
+  const [ests, setEsts] = useState<EstudianteInput[]>(
+    estudiantes.map((e) => ({ id: e.id, nombre: e.nombre, curso: e.curso }))
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setOk(false);
     if (!form.nombre.trim()) {
       setError("El nombre es obligatorio.");
       return;
     }
     startTransition(async () => {
       try {
-        await crearApoderado({ ...form, estudiantes });
-        router.push("/apoderados");
+        await actualizarApoderado(apoderado.id, {
+          nombre: form.nombre,
+          email: form.email,
+          telefono: form.telefono,
+          activo: form.activo,
+          estudiantes: ests,
+        });
+        setOk(true);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
       }
     });
   }
 
-  function upd<K extends keyof typeof form>(k: K, v: string) {
+  function upd<K extends "nombre" | "email" | "telefono">(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
@@ -56,7 +74,6 @@ export function ApoderadoForm() {
             className="input"
             value={form.email}
             onChange={(e) => upd("email", e.target.value)}
-            placeholder="opcional (recomendado para vincular su cuenta)"
           />
         </div>
         <div>
@@ -70,23 +87,36 @@ export function ApoderadoForm() {
       </div>
       <div>
         <label className="label">Hijos (estudiantes)</label>
-        <EstudiantesEditor value={estudiantes} onChange={setEstudiantes} />
+        <EstudiantesEditor value={ests} onChange={setEsts} />
       </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.activo}
+          onChange={(e) => setForm((f) => ({ ...f, activo: e.target.checked }))}
+        />
+        Apoderado activo
+      </label>
       {error && (
         <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
           {error}
         </div>
       )}
+      {ok && (
+        <div className="text-sm bg-green-50 text-green-800 rounded-md p-3">
+          Cambios guardados.
+        </div>
+      )}
       <div className="flex gap-2">
         <button className="btn-primary" disabled={pending}>
-          {pending ? "Guardando..." : "Guardar"}
+          {pending ? "Guardando..." : "Guardar cambios"}
         </button>
         <button
           type="button"
           className="btn-secondary"
-          onClick={() => router.back()}
+          onClick={() => router.push("/apoderados")}
         >
-          Cancelar
+          Volver
         </button>
       </div>
     </form>

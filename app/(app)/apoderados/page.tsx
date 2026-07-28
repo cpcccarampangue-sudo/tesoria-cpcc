@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatFecha } from "@/lib/formatters";
 import { ApoderadosSearch } from "./apoderados-search";
 import { ApoderadoRow } from "./apoderado-row";
-import type { Apoderado } from "@/lib/types";
+import type { Apoderado, Estudiante } from "@/lib/types";
 
 export const metadata = { title: "Apoderados — Tesorería CPCC" };
 
@@ -19,19 +19,32 @@ export default async function ApoderadosPage({
   const curso = (params.curso ?? "").trim();
 
   const supabase = await createSupabaseServerClient();
+
+  // Traer apoderados con sus estudiantes
   let query = supabase
     .from("apoderados")
-    .select("*")
+    .select("*, estudiantes(*)")
     .order("nombre", { ascending: true })
     .limit(500);
   if (q) query = query.ilike("nombre", `%${q}%`);
-  if (curso) query = query.eq("curso", curso);
-  const { data: apoderados } = await query;
+  const { data: raw } = await query;
 
+  type Row = Apoderado & { estudiantes: Estudiante[] };
+  let apoderados = (raw as Row[] | null) ?? [];
+
+  // Filtro por curso: en cliente (RLS ya trajo todo)
+  if (curso) {
+    apoderados = apoderados.filter((a) =>
+      (a.estudiantes ?? []).some((e) => e.curso === curso)
+    );
+  }
+
+  // Todos los cursos posibles para el <select>
   const { data: cursosRaw } = await supabase
-    .from("apoderados")
+    .from("estudiantes")
     .select("curso")
-    .not("curso", "is", null);
+    .not("curso", "is", null)
+    .eq("activo", true);
   const cursos = Array.from(
     new Set((cursosRaw ?? []).map((c) => c.curso).filter(Boolean) as string[])
   ).sort();
@@ -42,7 +55,7 @@ export default async function ApoderadosPage({
         <div>
           <h1 className="text-2xl font-semibold">Apoderados</h1>
           <p className="text-sm text-slate-600">
-            {apoderados?.length ?? 0} apoderado(s) mostrados
+            {apoderados.length} apoderado(s) mostrados
           </p>
         </div>
         <div className="flex gap-2">
@@ -59,7 +72,7 @@ export default async function ApoderadosPage({
         <ApoderadosSearch initialQ={q} initialCurso={curso} cursos={cursos} />
       </div>
 
-      {!apoderados || apoderados.length === 0 ? (
+      {apoderados.length === 0 ? (
         <div className="card text-sm text-slate-500">
           No hay apoderados que coincidan.
         </div>
@@ -69,8 +82,7 @@ export default async function ApoderadosPage({
             <thead className="bg-slate-50">
               <tr>
                 <th className="table-th">Nombre</th>
-                <th className="table-th">Estudiante</th>
-                <th className="table-th">Curso</th>
+                <th className="table-th">Hijos</th>
                 <th className="table-th">Email</th>
                 <th className="table-th">Teléfono</th>
                 <th className="table-th">Alta</th>
@@ -78,10 +90,11 @@ export default async function ApoderadosPage({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {(apoderados as Apoderado[]).map((a) => (
+              {apoderados.map((a) => (
                 <ApoderadoRow
                   key={a.id}
                   a={a}
+                  estudiantes={a.estudiantes ?? []}
                   altaLabel={formatFecha(a.created_at)}
                 />
               ))}

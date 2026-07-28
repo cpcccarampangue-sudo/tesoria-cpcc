@@ -23,13 +23,22 @@ create table if not exists apoderados (
   nombre text not null,
   email text unique,
   telefono text,
-  curso text,
-  nombre_estudiante text,
   activo boolean not null default true,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_apoderados_email on apoderados (lower(email));
-create index if not exists idx_apoderados_curso on apoderados (curso);
+
+-- === ESTUDIANTES (hijos del apoderado; una familia puede tener varios) ===
+create table if not exists estudiantes (
+  id uuid primary key default gen_random_uuid(),
+  apoderado_id uuid not null references apoderados(id) on delete cascade,
+  nombre text not null,
+  curso text,
+  activo boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_estudiantes_apoderado on estudiantes (apoderado_id);
+create index if not exists idx_estudiantes_curso on estudiantes (curso);
 
 -- === PROFILES (1:1 con auth.users) ===
 create table if not exists profiles (
@@ -134,7 +143,11 @@ create or replace view v_cuota_estado_apoderado as
 select
   a.id as apoderado_id,
   a.nombre,
-  a.curso,
+  (
+    select string_agg(coalesce(e.curso, '—'), ', ' order by e.curso)
+    from estudiantes e
+    where e.apoderado_id = a.id and e.activo
+  ) as curso,
   p.id as periodo_id,
   p.nombre as periodo,
   p.monto as monto_periodo,
@@ -211,6 +224,7 @@ for each row execute function handle_new_user();
 
 alter table profiles       enable row level security;
 alter table apoderados     enable row level security;
+alter table estudiantes    enable row level security;
 alter table categorias     enable row level security;
 alter table eventos        enable row level security;
 alter table cuota_periodos enable row level security;
@@ -224,7 +238,7 @@ begin
   for r in
     select schemaname, tablename, policyname from pg_policies
     where schemaname = 'public'
-      and tablename in ('profiles','apoderados','categorias','eventos',
+      and tablename in ('profiles','apoderados','estudiantes','categorias','eventos',
                         'cuota_periodos','cuota_pagos','movimientos')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
@@ -244,6 +258,12 @@ create policy apoderados_directiva_all on apoderados
   for all using (is_directiva()) with check (is_directiva());
 create policy apoderados_self_select on apoderados
   for select using (id = current_apoderado_id());
+
+-- === estudiantes ===
+create policy estudiantes_directiva_all on estudiantes
+  for all using (is_directiva()) with check (is_directiva());
+create policy estudiantes_self_select on estudiantes
+  for select using (apoderado_id = current_apoderado_id());
 
 -- === categorias ===
 create policy categorias_all_authenticated_select on categorias

@@ -3,10 +3,10 @@ import { ImportForm } from "./import-form";
 
 export const metadata = { title: "Importar apoderados — Tesorería CPCC" };
 
-const CSV_EJEMPLO = `nombre,email,telefono,curso,nombre_estudiante
-María Pérez,maria.perez@ejemplo.cl,+56 9 1234 5678,5°B,Juan Pérez
-Carlos Soto,,,,Ana Soto
-Ana Rojas,ana.rojas@ejemplo.cl,,4°A,`;
+const CSV_EJEMPLO = `nombre,email,telefono,estudiantes
+María Pérez,maria.perez@ejemplo.cl,+56 9 1234 5678,Juan Pérez:5°B; Sofía Pérez:3°A
+Carlos Soto,,,Ana Soto:K
+Ana Rojas,ana.rojas@ejemplo.cl,,`;
 
 export default async function ImportarApoderadosPage() {
   await requireDirectiva();
@@ -25,15 +25,20 @@ export default async function ImportarApoderadosPage() {
         <h2 className="font-semibold mb-2">Columnas esperadas</h2>
         <ul className="text-sm text-slate-600 list-disc pl-5 space-y-1">
           <li>
-            <code>nombre</code> — obligatorio
+            <code>nombre</code> — obligatorio (nombre del apoderado)
           </li>
           <li>
             <code>email</code> — recomendado (se usa para vincular la cuenta
             cuando el apoderado ingrese)
           </li>
           <li>
-            <code>telefono</code>, <code>curso</code>,{" "}
-            <code>nombre_estudiante</code> — opcionales
+            <code>telefono</code> — opcional
+          </li>
+          <li>
+            <code>estudiantes</code> — opcional. Formato:{" "}
+            <code>Nombre1:Curso1; Nombre2:Curso2</code>. Separa hijos con{" "}
+            <code>;</code> y usa <code>:</code> entre nombre y curso. Ejemplo:{" "}
+            <code>Juan Pérez:5°B; Sofía Pérez:3°A</code>.
           </li>
         </ul>
         <div className="mt-3">
