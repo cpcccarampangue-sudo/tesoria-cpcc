@@ -35,6 +35,8 @@ export type Contacto = {
   email: string | null;
   telefono: string | null;
   relacion: ContactoRelacion;
+  es_apoderado_cuenta: boolean;
+  es_apoderado_academico: boolean;
   activo: boolean;
   created_at: string;
 };

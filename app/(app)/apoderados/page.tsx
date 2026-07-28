@@ -60,15 +60,18 @@ export default async function ApoderadosPage({
             {apoderados.length} familia(s) mostradas · {totalSocios} socias
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Link href="/apoderados/nuevo" className="btn-secondary">
             + Nueva familia
           </Link>
           <Link href="/apoderados/importar" className="btn-secondary">
             Importar CSV
           </Link>
-          <Link href="/apoderados/importar-excel" className="btn-primary">
-            Importar Excel colegio
+          <Link href="/apoderados/importar-excel" className="btn-secondary">
+            Importar Excel
+          </Link>
+          <Link href="/apoderados/sincronizar" className="btn-primary">
+            🔄 Sincronizar Google Sheets
           </Link>
         </div>
       </div>
