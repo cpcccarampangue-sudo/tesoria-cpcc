@@ -31,7 +31,6 @@ function cleanEmail(v: string): string | null {
   return t;
 }
 
-// Convierte fechas tipo "04/03/2026" (DD/MM/YYYY) a "2026-03-04" (ISO date)
 function parseFecha(v: string): string | null {
   const t = v.trim();
   if (!t) return null;
@@ -56,10 +55,20 @@ function buildNombre(...partes: string[]): string {
 
 function extraerContacto(
   row: Row,
-  cols: { nombres: number; apP: number; apM: number; tel: number; email: number },
+  cols: {
+    nombres: number;
+    apP: number;
+    apM: number;
+    tel: number;
+    email: number;
+  },
   relacion: ContactoRelacion
 ) {
-  const nombre = buildNombre(s(row[cols.nombres]), s(row[cols.apP]), s(row[cols.apM]));
+  const nombre = buildNombre(
+    s(row[cols.nombres]),
+    s(row[cols.apP]),
+    s(row[cols.apM])
+  );
   if (!nombre) return null;
   return {
     nombre,
@@ -69,34 +78,43 @@ function extraerContacto(
   };
 }
 
+async function chunkedInsert(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  table: string,
+  rows: Record<string, unknown>[],
+  chunkSize = 500
+) {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await admin.from(table).insert(chunk as any);
+    if (error)
+      throw new Error(`insert ${table} (chunk ${i}): ${error.message}`);
+  }
+}
+
 /**
  * Importa el Excel específico "familias 2026 Actualizado Abril.xlsx".
- * Estructura esperada de Sheet1 (30 columnas):
- *   0 familia, 1 Socio (SI/NO), 2 Fecha Inscripcion, 3 valor, 4 agenda, 5 N° Comprobante,
- *   6-9  Alumno: Nombres, Ap.paterno, Ap.materno, Curso
- *   10-14 Padre: Nombres, Ap.p, Ap.m, celular, eMail
- *   15-19 Madre: idem
- *   20-24 Apoderado de cuenta: idem
- *   25-29 Apoderado académico: idem
- *
- * - Agrupa filas por `familia` (una familia = varios estudiantes).
- * - Crea/actualiza apoderado (nombre familia, socio).
- * - Reemplaza contactos y estudiantes de esa familia con lo del Excel.
- * - Si `periodoNombre` no es null y hay filas socio con valor, crea el período
- *   de cuota y registra los pagos + movimiento de ingreso correspondiente.
+ * Optimizado con operaciones en lote para evitar timeout en Netlify.
  */
 export async function importarExcelFamilias(
-  fileBytes: ArrayBuffer,
-  opciones: {
-    periodoNombre: string | null;
-    montoDefault: number; // usado si el Excel no tiene valor por familia
-    generarPagos: boolean;
-  }
+  formData: FormData
 ): Promise<ExcelImportResult> {
   const profile = await requireDirectiva();
   const admin = createSupabaseAdminClient();
 
-  const wb = XLSX.read(fileBytes, { type: "array" });
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    throw new Error("No se recibió el archivo.");
+  }
+  const generarPagos = formData.get("generarPagos") === "1";
+  const periodoNombre = generarPagos
+    ? String(formData.get("periodoNombre") ?? "").trim() || null
+    : null;
+  const montoDefault = Number(formData.get("montoDefault") ?? 0);
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const wb = XLSX.read(bytes, { type: "array" });
   const wsName = wb.SheetNames.includes("Sheet1")
     ? "Sheet1"
     : wb.SheetNames[0];
@@ -119,17 +137,17 @@ export async function importarExcelFamilias(
     errores: [],
   };
 
-  // Saltar header
   const dataRows = rows.slice(1).filter((r) => s(r[0]));
 
-  // Agrupar por nombre de familia
+  // Agrupar por familia
+  type ContactoTmp = NonNullable<ReturnType<typeof extraerContacto>>;
   type FamData = {
     nombre: string;
     socio: boolean;
     fechaInscripcion: string | null;
     valor: number;
     comprobante: string | null;
-    contactos: Map<string, ReturnType<typeof extraerContacto>>;
+    contactos: Map<ContactoRelacion, ContactoTmp>;
     estudiantes: { nombre: string; curso: string | null }[];
   };
 
@@ -155,21 +173,18 @@ export async function importarExcelFamilias(
       };
       familias.set(nombre, fam);
     } else {
-      // Combinar: si ya tenía valor, mantener el mayor; fecha/comprobante si no existían
       if (valor > fam.valor) fam.valor = valor;
       if (!fam.fechaInscripcion && fecha) fam.fechaInscripcion = fecha;
       if (!fam.comprobante && comprobante) fam.comprobante = comprobante;
       if (socio) fam.socio = true;
     }
 
-    // Estudiante de esta fila
     const alumnoNombre = buildNombre(s(row[6]), s(row[7]), s(row[8]));
     const alumnoCurso = s(row[9]) || null;
     if (alumnoNombre) {
       fam.estudiantes.push({ nombre: alumnoNombre, curso: alumnoCurso });
     }
 
-    // Contactos (dedupear por relacion)
     const padre = extraerContacto(
       row,
       { nombres: 10, apP: 11, apM: 12, tel: 13, email: 14 },
@@ -198,24 +213,24 @@ export async function importarExcelFamilias(
     }
   }
 
-  // Crear período de cuota si corresponde
+  result.familiasProcesadas = familias.size;
+
+  // === 1. Crear período de cuota si corresponde ===
   let periodoId: string | null = null;
-  if (opciones.generarPagos && opciones.periodoNombre) {
-    // Buscar si ya existe
+  if (generarPagos && periodoNombre) {
     const { data: existente } = await admin
       .from("cuota_periodos")
       .select("id")
-      .eq("nombre", opciones.periodoNombre)
+      .eq("nombre", periodoNombre)
       .maybeSingle();
-
     if (existente) {
       periodoId = existente.id;
     } else {
       const { data: nuevo, error: eP } = await admin
         .from("cuota_periodos")
         .insert({
-          nombre: opciones.periodoNombre,
-          monto: opciones.montoDefault,
+          nombre: periodoNombre,
+          monto: montoDefault,
           activa: true,
         })
         .select("id")
@@ -227,89 +242,132 @@ export async function importarExcelFamilias(
     result.cuotasPeriodoId = periodoId;
   }
 
-  // Buscar categoría "Cuota apoderado" para los movimientos
-  const { data: catCuota } = await admin
-    .from("categorias")
-    .select("id")
-    .eq("nombre", "Cuota apoderado")
-    .maybeSingle();
+  // === 2. Cargar familias existentes ===
+  const { data: existentes } = await admin
+    .from("apoderados")
+    .select("id, nombre");
+  const existentesMap = new Map<string, string>();
+  for (const e of existentes ?? []) existentesMap.set(e.nombre, e.id);
 
-  // Procesar cada familia
-  for (const fam of familias.values()) {
-    result.familiasProcesadas++;
-    try {
-      // Buscar familia existente: por nombre exacto
-      const { data: ex } = await admin
-        .from("apoderados")
-        .select("id")
-        .eq("nombre", fam.nombre)
-        .maybeSingle();
+  // === 3. Insertar/actualizar familias en lote ===
+  const familiasArr = Array.from(familias.values());
+  const nuevas = familiasArr.filter((f) => !existentesMap.has(f.nombre));
+  const actualizar = familiasArr.filter((f) => existentesMap.has(f.nombre));
 
-      let apoderadoId: string;
-      if (ex) {
-        await admin
-          .from("apoderados")
-          .update({ activo: true, socio: fam.socio })
-          .eq("id", ex.id);
-        apoderadoId = ex.id;
-        result.familiasActualizadas++;
-      } else {
-        const { data: nuevo, error: eA } = await admin
-          .from("apoderados")
-          .insert({ nombre: fam.nombre, activo: true, socio: fam.socio })
-          .select("id")
-          .single();
-        if (eA) throw eA;
-        apoderadoId = nuevo.id;
-        result.familiasCreadas++;
-      }
+  if (nuevas.length > 0) {
+    const { data: creadas, error: eIns } = await admin
+      .from("apoderados")
+      .insert(
+        nuevas.map((f) => ({
+          nombre: f.nombre,
+          activo: true,
+          socio: f.socio,
+        }))
+      )
+      .select("id, nombre");
+    if (eIns) throw new Error("Insertando familias: " + eIns.message);
+    for (const c of creadas ?? []) existentesMap.set(c.nombre, c.id);
+    result.familiasCreadas = nuevas.length;
+  }
 
-      // Reemplazar contactos
-      await admin.from("contactos").delete().eq("apoderado_id", apoderadoId);
-      const contactosArr = Array.from(fam.contactos.values()).filter(
-        (c) => c !== null
-      ) as NonNullable<ReturnType<typeof extraerContacto>>[];
-      if (contactosArr.length > 0) {
-        // Deduplicar emails duplicados dentro de la misma familia (padre=apCuenta)
-        const vistos = new Set<string>();
-        const insert = contactosArr
-          .filter((c) => {
-            if (!c.email) return true;
-            if (vistos.has(c.email)) return false;
-            vistos.add(c.email);
-            return true;
-          })
-          .map((c) => ({
-            apoderado_id: apoderadoId,
+  // Actualizar existentes (una llamada por familia — se puede optimizar más)
+  for (const f of actualizar) {
+    const { error: eU } = await admin
+      .from("apoderados")
+      .update({ activo: true, socio: f.socio })
+      .eq("id", existentesMap.get(f.nombre)!);
+    if (eU) result.errores.push(`${f.nombre} update: ${eU.message}`);
+  }
+  result.familiasActualizadas = actualizar.length;
+
+  // === 4. Borrar contactos y estudiantes de TODAS las familias que vamos a re-cargar ===
+  const familiaIds = familiasArr
+    .map((f) => existentesMap.get(f.nombre))
+    .filter(Boolean) as string[];
+
+  if (familiaIds.length > 0) {
+    await admin.from("contactos").delete().in("apoderado_id", familiaIds);
+    await admin.from("estudiantes").delete().in("apoderado_id", familiaIds);
+  }
+
+  // === 5. Bulk insert contactos ===
+  const contactosBulk: {
+    apoderado_id: string;
+    nombre: string;
+    email: string | null;
+    telefono: string | null;
+    relacion: ContactoRelacion;
+    activo: boolean;
+  }[] = [];
+  const emailsVistos = new Set<string>();
+  for (const fam of familiasArr) {
+    const fid = existentesMap.get(fam.nombre);
+    if (!fid) continue;
+    for (const c of fam.contactos.values()) {
+      // Deduplicar emails globalmente (contactos.email tiene unique index)
+      if (c.email) {
+        if (emailsVistos.has(c.email)) {
+          contactosBulk.push({
+            apoderado_id: fid,
             nombre: c.nombre,
-            email: c.email,
+            email: null,
             telefono: c.telefono,
             relacion: c.relacion,
             activo: true,
-          }));
-        if (insert.length > 0) {
-          const { error: eC } = await admin.from("contactos").insert(insert);
-          if (eC) throw new Error(`${fam.nombre} - contactos: ${eC.message}`);
-          result.contactosCreados += insert.length;
+          });
+          continue;
         }
+        emailsVistos.add(c.email);
       }
+      contactosBulk.push({
+        apoderado_id: fid,
+        nombre: c.nombre,
+        email: c.email,
+        telefono: c.telefono,
+        relacion: c.relacion,
+        activo: true,
+      });
+    }
+  }
+  await chunkedInsert(admin, "contactos", contactosBulk);
+  result.contactosCreados = contactosBulk.length;
 
-      // Reemplazar estudiantes
-      await admin.from("estudiantes").delete().eq("apoderado_id", apoderadoId);
-      if (fam.estudiantes.length > 0) {
-        const insertEst = fam.estudiantes.map((e) => ({
-          apoderado_id: apoderadoId,
-          nombre: e.nombre,
-          curso: e.curso,
-          activo: true,
-        }));
-        const { error: eE } = await admin.from("estudiantes").insert(insertEst);
-        if (eE) throw new Error(`${fam.nombre} - estudiantes: ${eE.message}`);
-        result.estudiantesCreados += insertEst.length;
-      }
+  // === 6. Bulk insert estudiantes ===
+  const estudiantesBulk: {
+    apoderado_id: string;
+    nombre: string;
+    curso: string | null;
+    activo: boolean;
+  }[] = [];
+  for (const fam of familiasArr) {
+    const fid = existentesMap.get(fam.nombre);
+    if (!fid) continue;
+    for (const e of fam.estudiantes) {
+      estudiantesBulk.push({
+        apoderado_id: fid,
+        nombre: e.nombre,
+        curso: e.curso,
+        activo: true,
+      });
+    }
+  }
+  await chunkedInsert(admin, "estudiantes", estudiantesBulk);
+  result.estudiantesCreados = estudiantesBulk.length;
 
-      // Crear/actualizar pago de cuota
-      if (periodoId) {
+  // === 7. Cuotas ===
+  if (periodoId) {
+    // Borrar cuota_pagos existentes de este período para estas familias
+    await admin
+      .from("cuota_pagos")
+      .delete()
+      .eq("periodo_id", periodoId)
+      .in("apoderado_id", familiaIds);
+
+    // Bulk insert cuota_pagos
+    const pagosBulk = familiasArr
+      .map((fam) => {
+        const fid = existentesMap.get(fam.nombre);
+        if (!fid) return null;
         const montoPagado = fam.socio && fam.valor > 0 ? fam.valor : 0;
         const estado =
           fam.socio && montoPagado > 0
@@ -317,49 +375,76 @@ export async function importarExcelFamilias(
             : fam.socio
             ? "pendiente"
             : "exenta";
-
-        // Upsert por (periodo, apoderado)
-        await admin.from("cuota_pagos").delete().match({
+        return {
           periodo_id: periodoId,
-          apoderado_id: apoderadoId,
-        });
-        const { data: pago, error: ePago } = await admin
-          .from("cuota_pagos")
-          .insert({
-            periodo_id: periodoId,
-            apoderado_id: apoderadoId,
-            monto_pagado: montoPagado,
-            estado,
-            fecha_pago: fam.fechaInscripcion,
-            nota: fam.comprobante ? `Comprobante ${fam.comprobante}` : null,
-          })
-          .select("id")
-          .single();
-        if (ePago) throw new Error(`${fam.nombre} - cuota: ${ePago.message}`);
+          apoderado_id: fid,
+          monto_pagado: montoPagado,
+          estado,
+          fecha_pago: montoPagado > 0 ? fam.fechaInscripcion : null,
+          nota: fam.comprobante ? `Comprobante ${fam.comprobante}` : null,
+        };
+      })
+      .filter(Boolean) as {
+      periodo_id: string;
+      apoderado_id: string;
+      monto_pagado: number;
+      estado: string;
+      fecha_pago: string | null;
+      nota: string | null;
+    }[];
 
-        // Movimiento en libro de caja
-        if (montoPagado > 0 && pago) {
-          await admin.from("movimientos").insert({
-            fecha:
-              fam.fechaInscripcion ??
-              new Date().toISOString().slice(0, 10),
-            tipo: "ingreso",
-            monto: montoPagado,
-            descripcion: `Cuota ${opciones.periodoNombre} — ${fam.nombre}${
-              fam.comprobante ? ` (comp. ${fam.comprobante})` : ""
-            }`,
-            categoria_id: catCuota?.id ?? null,
-            cuota_pago_id: pago.id,
-            created_by: profile.id,
-          });
-          result.cuotasPagadas++;
-        }
+    // Insert cuota_pagos y capturar IDs para el movimiento
+    const pagosCreados: { id: string; apoderado_id: string; monto: number }[] =
+      [];
+    for (let i = 0; i < pagosBulk.length; i += 500) {
+      const chunk = pagosBulk.slice(i, i + 500);
+      const { data, error } = await admin
+        .from("cuota_pagos")
+        .insert(chunk)
+        .select("id, apoderado_id, monto_pagado");
+      if (error) throw new Error("cuota_pagos: " + error.message);
+      for (const d of data ?? []) {
+        pagosCreados.push({
+          id: d.id,
+          apoderado_id: d.apoderado_id,
+          monto: Number(d.monto_pagado),
+        });
       }
-    } catch (err) {
-      result.errores.push(
-        `${fam.nombre}: ${err instanceof Error ? err.message : String(err)}`
-      );
     }
+
+    // Movimientos (solo para pagos > 0)
+    const { data: catCuota } = await admin
+      .from("categorias")
+      .select("id")
+      .eq("nombre", "Cuota apoderado")
+      .maybeSingle();
+
+    const famById = new Map<string, FamData>();
+    for (const fam of familiasArr) {
+      const fid = existentesMap.get(fam.nombre);
+      if (fid) famById.set(fid, fam);
+    }
+
+    const movimientosBulk = pagosCreados
+      .filter((p) => p.monto > 0)
+      .map((p) => {
+        const fam = famById.get(p.apoderado_id);
+        return {
+          fecha:
+            fam?.fechaInscripcion ?? new Date().toISOString().slice(0, 10),
+          tipo: "ingreso",
+          monto: p.monto,
+          descripcion: `Cuota ${periodoNombre} — ${fam?.nombre ?? ""}${
+            fam?.comprobante ? ` (comp. ${fam.comprobante})` : ""
+          }`,
+          categoria_id: catCuota?.id ?? null,
+          cuota_pago_id: p.id,
+          created_by: profile.id,
+        };
+      });
+
+    await chunkedInsert(admin, "movimientos", movimientosBulk);
+    result.cuotasPagadas = movimientosBulk.length;
   }
 
   revalidatePath("/apoderados");

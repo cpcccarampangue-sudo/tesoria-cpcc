@@ -39,12 +39,12 @@ export function ImportExcelForm() {
 
     startTransition(async () => {
       try {
-        const bytes = await file.arrayBuffer();
-        const r = await importarExcelFamilias(bytes, {
-          periodoNombre: generarPagos ? periodoNombre.trim() : null,
-          montoDefault: montoNum ?? 0,
-          generarPagos,
-        });
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("generarPagos", generarPagos ? "1" : "0");
+        fd.append("periodoNombre", periodoNombre.trim());
+        fd.append("montoDefault", String(montoNum ?? 0));
+        const r = await importarExcelFamilias(fd);
         setResult(r);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
@@ -134,9 +134,7 @@ export function ImportExcelForm() {
           <div>Contactos cargados: {result.contactosCreados}</div>
           <div>Estudiantes cargados: {result.estudiantesCreados}</div>
           {result.cuotasPeriodoId && (
-            <>
-              <div>Cuotas pagadas registradas: {result.cuotasPagadas}</div>
-            </>
+            <div>Cuotas pagadas registradas: {result.cuotasPagadas}</div>
           )}
           {result.errores.length > 0 && (
             <>
@@ -157,7 +155,9 @@ export function ImportExcelForm() {
       )}
 
       <button className="btn-primary" disabled={pending}>
-        {pending ? "Importando (puede tardar 30-60 segundos)..." : "Importar"}
+        {pending
+          ? "Importando (puede tardar 30-60 segundos)..."
+          : "Importar"}
       </button>
     </form>
   );
