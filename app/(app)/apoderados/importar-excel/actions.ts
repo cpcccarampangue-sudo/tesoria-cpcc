@@ -93,6 +93,17 @@ async function chunkedInsert(
   }
 }
 
+// Ejecuta un .in() en chunks para evitar exceder el límite de URL de PostgREST.
+async function chunkedInFilter<T>(
+  ids: string[],
+  chunkSize: number,
+  op: (chunk: string[]) => Promise<T | void>
+) {
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    await op(ids.slice(i, i + chunkSize));
+  }
+}
+
 /**
  * Importa el Excel específico "familias 2026 Actualizado Abril.xlsx".
  * Optimizado con operaciones en lote para evitar timeout en Netlify.
@@ -294,14 +305,31 @@ async function runImport(formData: FormData): Promise<ExcelImportResult> {
     result.familiasCreadas = nuevas.length;
   }
 
-  // Actualizar existentes (una llamada por familia — se puede optimizar más)
-  for (const f of actualizar) {
-    const { error: eU } = await admin
+  // Actualizar existentes en 2 queries agrupadas por valor de socio
+  // (evita 500+ round-trips que hacen timeout la función de Netlify).
+  const idsSiSocio = actualizar
+    .filter((f) => f.socio)
+    .map((f) => existentesMap.get(f.nombre)!)
+    .filter(Boolean);
+  const idsNoSocio = actualizar
+    .filter((f) => !f.socio)
+    .map((f) => existentesMap.get(f.nombre)!)
+    .filter(Boolean);
+
+  await chunkedInFilter(idsSiSocio, 150, async (chunk) => {
+    const { error } = await admin
       .from("apoderados")
-      .update({ activo: true, socio: f.socio })
-      .eq("id", existentesMap.get(f.nombre)!);
-    if (eU) result.errores.push(`${f.nombre} update: ${eU.message}`);
-  }
+      .update({ activo: true, socio: true })
+      .in("id", chunk);
+    if (error) result.errores.push(`update socios: ${error.message}`);
+  });
+  await chunkedInFilter(idsNoSocio, 150, async (chunk) => {
+    const { error } = await admin
+      .from("apoderados")
+      .update({ activo: true, socio: false })
+      .in("id", chunk);
+    if (error) result.errores.push(`update no-socios: ${error.message}`);
+  });
   result.familiasActualizadas = actualizar.length;
 
   // === 4. Borrar contactos y estudiantes de TODAS las familias que vamos a re-cargar ===
@@ -310,8 +338,12 @@ async function runImport(formData: FormData): Promise<ExcelImportResult> {
     .filter(Boolean) as string[];
 
   if (familiaIds.length > 0) {
-    await admin.from("contactos").delete().in("apoderado_id", familiaIds);
-    await admin.from("estudiantes").delete().in("apoderado_id", familiaIds);
+    await chunkedInFilter(familiaIds, 150, async (chunk) => {
+      await admin.from("contactos").delete().in("apoderado_id", chunk);
+    });
+    await chunkedInFilter(familiaIds, 150, async (chunk) => {
+      await admin.from("estudiantes").delete().in("apoderado_id", chunk);
+    });
   }
 
   // === 5. Bulk insert contactos ===
@@ -381,11 +413,13 @@ async function runImport(formData: FormData): Promise<ExcelImportResult> {
   // === 7. Cuotas ===
   if (periodoId) {
     // Borrar cuota_pagos existentes de este período para estas familias
-    await admin
-      .from("cuota_pagos")
-      .delete()
-      .eq("periodo_id", periodoId)
-      .in("apoderado_id", familiaIds);
+    await chunkedInFilter(familiaIds, 150, async (chunk) => {
+      await admin
+        .from("cuota_pagos")
+        .delete()
+        .eq("periodo_id", periodoId)
+        .in("apoderado_id", chunk);
+    });
 
     // Bulk insert cuota_pagos
     const pagosBulk = familiasArr
