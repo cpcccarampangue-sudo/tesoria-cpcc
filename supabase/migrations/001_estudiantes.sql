@@ -1,12 +1,13 @@
 -- =============================================================================
 -- Migración 001: separar estudiantes de apoderados
 --
--- Corre este script UNA VEZ en Supabase SQL Editor si ya tenías el schema
--- anterior. Si es una instalación nueva y ya corriste schema.sql (nuevo),
--- no necesitas correr esto (ya está incluido).
+-- Corre este script UNA VEZ en Supabase SQL Editor. Idempotente.
 -- =============================================================================
 
--- Nueva tabla
+-- Dropear la vista primero (depende de la columna curso que vamos a eliminar)
+drop view if exists v_cuota_estado_apoderado;
+
+-- Nueva tabla estudiantes
 create table if not exists estudiantes (
   id uuid primary key default gen_random_uuid(),
   apoderado_id uuid not null references apoderados(id) on delete cascade,
@@ -18,14 +19,12 @@ create table if not exists estudiantes (
 create index if not exists idx_estudiantes_apoderado on estudiantes (apoderado_id);
 create index if not exists idx_estudiantes_curso on estudiantes (curso);
 
--- Migrar datos existentes (si hay filas con nombre_estudiante en apoderados)
+-- Migrar datos existentes de apoderados.nombre_estudiante → estudiantes
 do $$
 begin
   if exists (
     select 1 from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'apoderados'
-      and column_name = 'nombre_estudiante'
+    where table_schema='public' and table_name='apoderados' and column_name='nombre_estudiante'
   ) then
     insert into estudiantes (apoderado_id, nombre, curso, activo)
     select a.id, a.nombre_estudiante, a.curso, a.activo
@@ -39,7 +38,7 @@ alter table apoderados drop column if exists nombre_estudiante;
 alter table apoderados drop column if exists curso;
 drop index if exists idx_apoderados_curso;
 
--- Actualizar la vista de cuotas para agregar los cursos de los hijos
+-- Recrear la vista con la nueva estructura (cursos agregados desde estudiantes)
 create or replace view v_cuota_estado_apoderado as
 select
   a.id as apoderado_id,
@@ -61,10 +60,8 @@ where a.activo and p.activa;
 
 -- RLS de estudiantes
 alter table estudiantes enable row level security;
-
 drop policy if exists estudiantes_directiva_all on estudiantes;
 drop policy if exists estudiantes_self_select on estudiantes;
-
 create policy estudiantes_directiva_all on estudiantes
   for all using (is_directiva()) with check (is_directiva());
 create policy estudiantes_self_select on estudiantes
