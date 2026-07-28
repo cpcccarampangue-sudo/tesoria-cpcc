@@ -19,6 +19,7 @@ export default async function AppLayout({
     { href: "/apoderados", label: "Familias" },
     { href: "/categorias", label: "Categorías" },
     { href: "/reportes", label: "Reportes" },
+    { href: "/usuarios", label: "Usuarios" },
   ];
 
   const navBasico = [
