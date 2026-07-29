@@ -5,7 +5,7 @@ Sistema web para llevar las cuentas del Centro de Padres. Directiva registra mov
 - **Stack**: Next.js 15 + Supabase (Postgres, Auth, Storage) — todo en capa gratuita.
 - **Idioma**: español (Chile). Montos en CLP sin decimales.
 - **Costo**: $0/mes.
-- **URL en producción**: https://tesoria-cpcc-ten.vercel.app/
+- **URL en producción**: https://tesoria-cpcc.vercel.app/
 - **Hosting**: Vercel Hobby, proyecto `tesoria-cpcc` bajo el team institucional `cpcccarampangue-sudo's projects` (correo `cpcc.carampangue@gmail.com`).
 
 ---
@@ -134,7 +134,7 @@ git push -u origin main
 
 ## 5. Desplegar a Vercel
 
-La app corre en Vercel Hobby bajo el team institucional (correo `cpcc.carampangue@gmail.com`, GitHub `cpcccarampangue-sudo`). URL de producción: **https://tesoria-cpcc-ten.vercel.app/**.
+La app corre en Vercel Hobby bajo el team institucional (correo `cpcc.carampangue@gmail.com`, GitHub `cpcccarampangue-sudo`). URL de producción: **https://tesoria-cpcc.vercel.app/**.
 
 ### Requisitos importantes antes de empezar
 
@@ -185,7 +185,7 @@ Cambiar env vars en Vercel **NO dispara un redeploy automático**. Después de e
 
 ## 6. Primer ingreso y promoción de directiva
 
-1. Abre https://tesoria-cpcc-ten.vercel.app/ (o la URL que te dio Vercel).
+1. Abre https://tesoria-cpcc.vercel.app/ (o la URL que te dio Vercel).
 2. En la pantalla de login click en el tab **Crear cuenta** e ingresa tu correo + una contraseña (mínimo 8 caracteres).
 3. Vas a entrar como **apoderado** por defecto.
 4. Ve a Supabase → **SQL Editor** → New query y corre:
@@ -209,7 +209,7 @@ En tu repo de GitHub, ve a **Settings → Secrets and variables → Actions** y 
   ```
   postgresql://postgres:TU_PASSWORD@db.xxxxxx.supabase.co:5432/postgres
   ```
-- **`APP_URL`**: tu URL de Vercel (ej. `https://tesoria-cpcc-ten.vercel.app`).
+- **`APP_URL`**: tu URL de Vercel (ej. `https://tesoria-cpcc.vercel.app`).
 
 Los dos workflows ya están configurados:
 
