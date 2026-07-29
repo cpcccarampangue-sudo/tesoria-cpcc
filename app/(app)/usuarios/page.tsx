@@ -31,6 +31,14 @@ export default async function UsuariosPage() {
 
   const usuarios = (data as unknown as ProfileRow[] | null) ?? [];
 
+  // Familias disponibles para el selector de vinculación
+  const { data: apoderadosRaw } = await supabase
+    .from("apoderados")
+    .select("id, nombre")
+    .eq("activo", true)
+    .order("nombre");
+  const familias = (apoderadosRaw ?? []) as { id: string; nombre: string }[];
+
   // Cursos disponibles para el dropdown de delegados
   const { data: cursosRaw } = await supabase
     .from("estudiantes")
@@ -101,6 +109,7 @@ export default async function UsuariosPage() {
                   key={u.id}
                   u={u}
                   cursos={cursos}
+                  familias={familias}
                   esYo={u.id === currentProfile.id}
                   altaLabel={formatFecha(u.created_at)}
                 />

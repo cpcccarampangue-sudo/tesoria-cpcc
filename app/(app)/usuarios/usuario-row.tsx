@@ -2,7 +2,11 @@
 
 import { useState, useTransition } from "react";
 import type { UserRole } from "@/lib/types";
-import { cambiarRolUsuario, eliminarUsuario } from "./actions";
+import {
+  cambiarRolUsuario,
+  eliminarUsuario,
+  vincularApoderado,
+} from "./actions";
 
 type Usuario = {
   id: string;
@@ -14,14 +18,18 @@ type Usuario = {
   apoderado: { nombre: string } | null;
 };
 
+type Familia = { id: string; nombre: string };
+
 export function UsuarioRow({
   u,
   cursos,
+  familias,
   esYo,
   altaLabel,
 }: {
   u: Usuario;
   cursos: string[];
+  familias: Familia[];
   esYo: boolean;
   altaLabel: string;
 }) {
@@ -31,14 +39,17 @@ export function UsuarioRow({
   const [cursoAsignado, setCursoAsignado] = useState<string>(
     u.curso_asignado ?? ""
   );
+  const [apoderadoId, setApoderadoId] = useState<string>(u.apoderado_id ?? "");
   const [message, setMessage] = useState<{
     type: "ok" | "err";
     text: string;
   } | null>(null);
 
-  const changed =
-    role !== u.role ||
-    (role === "delegado" && cursoAsignado !== (u.curso_asignado ?? ""));
+  const rolCambio = role !== u.role;
+  const cursoCambio =
+    role === "delegado" && cursoAsignado !== (u.curso_asignado ?? "");
+  const familiaCambio = apoderadoId !== (u.apoderado_id ?? "");
+  const changed = rolCambio || cursoCambio || familiaCambio;
 
   function guardar() {
     setMessage(null);
@@ -48,11 +59,16 @@ export function UsuarioRow({
     }
     startTransition(async () => {
       try {
-        await cambiarRolUsuario(
-          u.id,
-          role,
-          role === "delegado" ? cursoAsignado.trim() : null
-        );
+        if (rolCambio || cursoCambio) {
+          await cambiarRolUsuario(
+            u.id,
+            role,
+            role === "delegado" ? cursoAsignado.trim() : null
+          );
+        }
+        if (familiaCambio) {
+          await vincularApoderado(u.id, apoderadoId || null);
+        }
         setMessage({ type: "ok", text: "Actualizado." });
       } catch (err) {
         setMessage({
@@ -77,9 +93,19 @@ export function UsuarioRow({
         {esYo && <span className="text-xs text-slate-500 ml-1">(tú)</span>}
       </td>
       <td className="table-td text-sm">
-        {u.apoderado?.nombre ?? (
-          <span className="text-slate-400">— sin vincular —</span>
-        )}
+        <select
+          className="input text-xs w-full max-w-xs"
+          value={apoderadoId}
+          onChange={(e) => setApoderadoId(e.target.value)}
+          disabled={pending}
+        >
+          <option value="">— sin vincular —</option>
+          {familias.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.nombre}
+            </option>
+          ))}
+        </select>
       </td>
       <td className="table-td">
         <div className="flex items-center gap-2">

@@ -38,3 +38,18 @@ export async function eliminarUsuario(userId: string) {
   if (error) throw new Error(error.message);
   revalidatePath("/usuarios");
 }
+
+export async function vincularApoderado(
+  userId: string,
+  apoderadoId: string | null
+) {
+  await requireDirectiva();
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from("profiles")
+    .update({ apoderado_id: apoderadoId })
+    .eq("id", userId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/usuarios");
+  revalidatePath("/dashboard");
+}
