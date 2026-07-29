@@ -9,6 +9,7 @@ export type SessionProfile = {
   role: UserRole;
   apoderado_id: string | null;
   curso_asignado: string | null;
+  first_login: boolean;
 };
 
 export async function getSessionProfile(): Promise<SessionProfile | null> {
@@ -20,7 +21,7 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, email, nombre, role, apoderado_id, curso_asignado")
+    .select("id, email, nombre, role, apoderado_id, curso_asignado, first_login")
     .eq("id", user.id)
     .single();
 
@@ -43,7 +44,7 @@ export async function requireProfile(): Promise<SessionProfile> {
 
   const { data: profile, error: profErr } = await supabase
     .from("profiles")
-    .select("id, email, nombre, role, apoderado_id, curso_asignado")
+    .select("id, email, nombre, role, apoderado_id, curso_asignado, first_login")
     .eq("id", user.id)
     .single();
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
+import { redirect } from "next/navigation";
 import { requireProfile, roleLabel } from "@/lib/auth";
 import { NavLink } from "@/components/nav-link";
 
@@ -9,6 +10,14 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const profile = await requireProfile();
+
+  // Cuenta creada por la directiva con contraseña temporal — obligar a
+  // cambiarla antes de dejar navegar la app. La ruta /cambiar-contrasena
+  // vive fuera del grupo (app), por eso el redirect no crea loop.
+  if (profile.first_login) {
+    redirect("/cambiar-contrasena");
+  }
+
   const esDirectiva = profile.role === "directiva";
 
   const navDirectiva = [

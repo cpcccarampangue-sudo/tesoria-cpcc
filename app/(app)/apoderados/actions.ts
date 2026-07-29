@@ -192,6 +192,113 @@ export async function eliminarApoderado(id: string) {
   revalidatePath("/apoderados");
 }
 
+// =============================================================================
+// INVITAR CONTACTOS: pre-crea cuentas de auth para los contactos con correo de
+// una familia. Cada cuenta recibe una contraseña temporal autogenerada; al
+// primer ingreso la persona debe cambiarla. La directiva recibe la lista para
+// compartir por WhatsApp/correo (los correos NO se envían desde Supabase por
+// el rate limit del plan gratuito).
+// =============================================================================
+
+export type InvitacionResultado = {
+  email: string;
+  nombre: string;
+  status: "creada" | "ya-existe" | "error";
+  password: string | null;
+  motivo?: string;
+};
+
+function generarPasswordTemporal(): string {
+  // Sin caracteres ambiguos (l, 1, i, I, o, 0, O).
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  const block = () =>
+    Array.from({ length: 4 }, () =>
+      chars.charAt(Math.floor(Math.random() * chars.length))
+    ).join("");
+  return `cpcc-${block()}-${block()}`;
+}
+
+export async function invitarContactosDeApoderado(
+  apoderadoId: string
+): Promise<InvitacionResultado[]> {
+  await requireDirectiva();
+  const admin = createSupabaseAdminClient();
+
+  const { data: contactos, error: eC } = await admin
+    .from("contactos")
+    .select("id, email, nombre")
+    .eq("apoderado_id", apoderadoId)
+    .not("email", "is", null)
+    .eq("activo", true);
+  if (eC) throw new Error("Buscando contactos: " + eC.message);
+
+  const resultados: InvitacionResultado[] = [];
+
+  for (const c of contactos ?? []) {
+    if (!c.email) continue;
+    const email = c.email.toLowerCase();
+
+    // ¿Ya tiene profile? (creado por el trigger si el auth.user ya existe).
+    const { data: yaTiene } = await admin
+      .from("profiles")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (yaTiene) {
+      resultados.push({
+        email,
+        nombre: c.nombre,
+        status: "ya-existe",
+        password: null,
+      });
+      continue;
+    }
+
+    const password = generarPasswordTemporal();
+
+    const { error: eCreate } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+    if (eCreate) {
+      resultados.push({
+        email,
+        nombre: c.nombre,
+        status: "error",
+        password: null,
+        motivo: eCreate.message,
+      });
+      continue;
+    }
+
+    // El trigger handle_new_user creó el profile con role=apoderado y
+    // apoderado_id vinculado. Le marcamos first_login=true.
+    const { error: eUpd } = await admin
+      .from("profiles")
+      .update({ first_login: true })
+      .eq("email", email);
+    if (eUpd) {
+      resultados.push({
+        email,
+        nombre: c.nombre,
+        status: "error",
+        password: null,
+        motivo: "creada pero no marcada como primer login: " + eUpd.message,
+      });
+      continue;
+    }
+
+    resultados.push({ email, nombre: c.nombre, status: "creada", password });
+  }
+
+  revalidatePath("/apoderados");
+  revalidatePath("/usuarios");
+  return resultados;
+}
+
 type ImportResult = {
   filas: number;
   insertados: number;

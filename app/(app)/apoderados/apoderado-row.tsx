@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
 import { RELACION_LABELS } from "@/lib/types";
 import { toggleActivo, eliminarApoderado } from "./actions";
+import { InvitarContactosDialog } from "./invitar-dialog";
 
 export function ApoderadoRow({
   a,
@@ -74,13 +75,20 @@ export function ApoderadoRow({
       </td>
       <td className="table-td">{altaLabel}</td>
       <td className="table-td text-right">
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 flex-wrap">
           <Link
             href={`/apoderados/${a.id}`}
             className="text-xs text-slate-600 hover:underline"
           >
             Editar
           </Link>
+          <InvitarContactosDialog
+            apoderadoId={a.id}
+            familiaNombre={a.nombre}
+            cantidadContactos={
+              contactos.filter((c) => c.email && c.activo).length
+            }
+          />
           <button
             className="text-xs text-slate-600 hover:underline disabled:opacity-50"
             disabled={pending}
