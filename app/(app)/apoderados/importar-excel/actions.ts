@@ -16,6 +16,7 @@ export type ExcelImportResult = {
   cuotasCreadas: number;
   cuotasPagadas: number;
   regalosRegistrados: number;
+  profilesVinculados: number;
   errores: string[];
 };
 
@@ -240,6 +241,7 @@ function failResult(err: unknown): ExcelImportResult {
     cuotasCreadas: 0,
     cuotasPagadas: 0,
     regalosRegistrados: 0,
+    profilesVinculados: 0,
     errores: [`CRÍTICO: ${msg}`],
   };
 }
@@ -287,6 +289,7 @@ async function runImportFromBytes(
     cuotasCreadas: 0,
     cuotasPagadas: 0,
     regalosRegistrados: 0,
+    profilesVinculados: 0,
     errores: [],
   };
 
@@ -789,9 +792,57 @@ async function runImportFromBytes(
     }
   }
 
+  // Retro-vincular profiles sin apoderado_id cuyo email exista en contactos.
+  // El trigger handle_new_user solo corre al signup, así que las cuentas que se
+  // crearon antes de que su email estuviera cargado como contacto quedan huérfanas.
+  {
+    const { data: sinVincular } = await admin
+      .from("profiles")
+      .select("id, email")
+      .is("apoderado_id", null);
+
+    const perfiles = (sinVincular ?? []).filter(
+      (p): p is { id: string; email: string } => !!p.email
+    );
+
+    if (perfiles.length > 0) {
+      const emails = Array.from(
+        new Set(perfiles.map((p) => p.email.toLowerCase()))
+      );
+      const emailToApo = new Map<string, string>();
+
+      await chunkedInFilter(emails, 150, async (chunk) => {
+        const { data: cs } = await admin
+          .from("contactos")
+          .select("email, apoderado_id")
+          .in("email", chunk)
+          .eq("activo", true);
+        for (const c of cs ?? []) {
+          const em = c.email ? c.email.toLowerCase() : null;
+          if (em && !emailToApo.has(em)) emailToApo.set(em, c.apoderado_id);
+        }
+      });
+
+      for (const p of perfiles) {
+        const apoId = emailToApo.get(p.email.toLowerCase());
+        if (!apoId) continue;
+        const { error } = await admin
+          .from("profiles")
+          .update({ apoderado_id: apoId })
+          .eq("id", p.id);
+        if (error) {
+          result.errores.push(`vincular profile ${p.email}: ${error.message}`);
+        } else {
+          result.profilesVinculados++;
+        }
+      }
+    }
+  }
+
   revalidatePath("/apoderados");
   revalidatePath("/cuotas");
   revalidatePath("/movimientos");
   revalidatePath("/dashboard");
+  revalidatePath("/usuarios");
   return result;
 }

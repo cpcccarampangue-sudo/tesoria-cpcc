@@ -211,6 +211,12 @@ export function SincronizarForm() {
               <div>Regalos entregados: {result.regalosRegistrados}</div>
             </>
           )}
+          {result.profilesVinculados > 0 && (
+            <div>
+              Cuentas vinculadas automáticamente a su familia:{" "}
+              {result.profilesVinculados}
+            </div>
+          )}
           {result.errores.length > 0 && (
             <>
               <div className="font-semibold text-red-800 mt-2">
