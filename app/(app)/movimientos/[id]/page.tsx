@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -55,7 +56,17 @@ export default async function MovimientoDetailPage({
             Creado {formatFechaHora(m.created_at)}
           </p>
         </div>
-        {m.boleta_path && <BoletaLink path={m.boleta_path} />}
+        <div className="flex items-center gap-2">
+          {m.boleta_path && <BoletaLink path={m.boleta_path} />}
+          <Link
+            href={`/movimientos/nuevo?tipo=${m.tipo}${
+              m.evento_id ? `&evento_id=${m.evento_id}` : ""
+            }`}
+            className="btn-secondary"
+          >
+            + Agregar otro
+          </Link>
+        </div>
       </div>
 
       <div className="card">
