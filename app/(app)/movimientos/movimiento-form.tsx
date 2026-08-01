@@ -2,8 +2,9 @@
 
 import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { BoletaUploader } from "@/components/boleta-uploader";
-import { parseCLPInput, formatNumber, todayISO } from "@/lib/formatters";
+import { parseCLPInput, formatCLP, formatNumber, todayISO } from "@/lib/formatters";
 import type { MovTipo } from "@/lib/types";
 import { crearMovimiento, actualizarMovimiento } from "./actions";
 
@@ -55,6 +56,11 @@ export function MovimientoForm({
   const [boletaPath, setBoletaPath] = useState<string | null>(
     initial?.boleta_path ?? null
   );
+  const [ultimo, setUltimo] = useState<{
+    id: string;
+    tipo: MovTipo;
+    monto: number;
+  } | null>(null);
 
   const montoNum = parseCLPInput(form.monto);
 
@@ -86,7 +92,17 @@ export function MovimientoForm({
           router.push(`/movimientos/${initial.id}`);
         } else {
           const id = await crearMovimiento(payload);
-          router.push(`/movimientos/${id}`);
+          setUltimo({ id, tipo: form.tipo, monto: montoNum });
+          // Mantener fecha, tipo y evento; limpiar el resto para agregar otro.
+          setForm((f) => ({
+            fecha: f.fecha,
+            tipo: f.tipo,
+            monto: "",
+            descripcion: "",
+            categoria_id: "",
+            evento_id: f.evento_id,
+          }));
+          setBoletaPath(null);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
@@ -96,6 +112,36 @@ export function MovimientoForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
+      {ultimo && !isEdit && (
+        <div className="rounded-md bg-green-50 border border-green-200 p-3 space-y-2">
+          <div className="text-sm text-green-900">
+            <strong>Movimiento guardado:</strong>{" "}
+            <span
+              className={
+                ultimo.tipo === "ingreso" ? "text-green-700" : "text-red-700"
+              }
+            >
+              {ultimo.tipo === "ingreso" ? "+" : "−"}
+              {formatCLP(ultimo.monto)}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setUltimo(null)}
+            >
+              Agregar otro
+            </button>
+            <Link href={`/movimientos/${ultimo.id}`} className="btn-secondary">
+              Ver movimiento
+            </Link>
+            <Link href="/movimientos" className="btn-secondary">
+              Volver al listado
+            </Link>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div>
           <label className="label">Fecha</label>
