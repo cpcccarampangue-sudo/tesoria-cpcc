@@ -22,6 +22,7 @@ export function MovimientosFilters({
   const [cuenta, setCuenta] = useState(sp.get("cuenta_id") ?? "");
   const [desde, setDesde] = useState(sp.get("desde") ?? "");
   const [hasta, setHasta] = useState(sp.get("hasta") ?? "");
+  const [sinCartola, setSinCartola] = useState(sp.get("sin_cartola") === "1");
 
   function apply() {
     const p = new URLSearchParams();
@@ -31,6 +32,7 @@ export function MovimientosFilters({
     if (cuenta) p.set("cuenta_id", cuenta);
     if (desde) p.set("desde", desde);
     if (hasta) p.set("hasta", hasta);
+    if (sinCartola) p.set("sin_cartola", "1");
     router.push(`/movimientos?${p.toString()}`);
   }
   function clear() {
@@ -40,6 +42,7 @@ export function MovimientosFilters({
     setCuenta("");
     setDesde("");
     setHasta("");
+    setSinCartola(false);
     router.push(`/movimientos`);
   }
 
@@ -126,7 +129,16 @@ export function MovimientosFilters({
           onChange={(e) => setHasta(e.target.value)}
         />
       </div>
-      <div className="col-span-2 sm:col-span-6 flex gap-2">
+      <div className="col-span-2 sm:col-span-6 flex flex-wrap gap-2 items-center">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={sinCartola}
+            onChange={(e) => setSinCartola(e.target.checked)}
+          />
+          Solo movimientos sin match en cartola
+        </label>
+        <div className="flex-1" />
         <button className="btn-primary">Aplicar filtros</button>
         <button type="button" className="btn-secondary" onClick={clear}>
           Limpiar

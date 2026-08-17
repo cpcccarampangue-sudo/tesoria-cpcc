@@ -416,6 +416,41 @@ create index if not exists idx_cartola_lineas_fecha on cartola_lineas (fecha des
 create index if not exists idx_cartola_lineas_no_conciliadas
   on cartola_lineas (cartola_id) where not conciliado;
 
+-- === CONCILIACIONES (N:M entre cartola_lineas y movimientos) ===
+create table if not exists conciliaciones (
+  id uuid primary key default gen_random_uuid(),
+  cartola_linea_id uuid not null references cartola_lineas(id) on delete cascade,
+  movimiento_id uuid not null references movimientos(id) on delete cascade,
+  auto boolean not null default false,
+  ajuste_glosa text,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (cartola_linea_id, movimiento_id)
+);
+create index if not exists idx_conciliaciones_linea on conciliaciones (cartola_linea_id);
+create index if not exists idx_conciliaciones_movimiento on conciliaciones (movimiento_id);
+
+-- Trigger para mantener cartola_lineas.conciliado sincronizado.
+create or replace function actualizar_conciliado_linea()
+returns trigger language plpgsql as $$
+declare v_id uuid;
+begin
+  v_id := coalesce(new.cartola_linea_id, old.cartola_linea_id);
+  update cartola_lineas
+     set conciliado = exists (
+       select 1 from conciliaciones c where c.cartola_linea_id = v_id
+     )
+   where id = v_id;
+  return coalesce(new, old);
+end;
+$$;
+drop trigger if exists trg_conciliacion_ai on conciliaciones;
+drop trigger if exists trg_conciliacion_ad on conciliaciones;
+create trigger trg_conciliacion_ai after insert on conciliaciones
+  for each row execute function actualizar_conciliado_linea();
+create trigger trg_conciliacion_ad after delete on conciliaciones
+  for each row execute function actualizar_conciliado_linea();
+
 alter table profiles           enable row level security;
 alter table apoderados         enable row level security;
 alter table estudiantes        enable row level security;
@@ -428,6 +463,7 @@ alter table movimientos        enable row level security;
 alter table movimiento_adjuntos enable row level security;
 alter table cartolas           enable row level security;
 alter table cartola_lineas     enable row level security;
+alter table conciliaciones     enable row level security;
 
 -- Drop policies existentes para poder re-ejecutar el script.
 do $$
@@ -438,7 +474,8 @@ begin
     where schemaname = 'public'
       and tablename in ('profiles','apoderados','estudiantes','categorias','cuentas',
                         'eventos','cuota_periodos','cuota_pagos','movimientos',
-                        'movimiento_adjuntos','cartolas','cartola_lineas')
+                        'movimiento_adjuntos','cartolas','cartola_lineas',
+                        'conciliaciones')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -504,10 +541,12 @@ drop policy if exists adjuntos_directiva_all on movimiento_adjuntos;
 create policy adjuntos_directiva_all on movimiento_adjuntos
   for all using (is_directiva()) with check (is_directiva());
 
--- === cartolas / cartola_lineas ===
+-- === cartolas / cartola_lineas / conciliaciones ===
 create policy cartolas_directiva_all on cartolas
   for all using (is_directiva()) with check (is_directiva());
 create policy cartola_lineas_directiva_all on cartola_lineas
+  for all using (is_directiva()) with check (is_directiva());
+create policy conciliaciones_directiva_all on conciliaciones
   for all using (is_directiva()) with check (is_directiva());
 
 -- =============================================================================

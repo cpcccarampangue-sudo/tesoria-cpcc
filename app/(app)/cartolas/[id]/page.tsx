@@ -105,11 +105,19 @@ export default async function CartolaDetailPage({
             · Subida {formatFechaHora(cartola.subida_en)}
           </p>
         </div>
-        <CartolaHeaderActions
-          cartolaId={cartola.id}
-          archivoPath={cartola.archivo_path}
-          archivoNombre={cartola.archivo_nombre}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/cartolas/${cartola.id}/reconciliar`}
+            className="btn-primary text-sm"
+          >
+            Reconciliar
+          </Link>
+          <CartolaHeaderActions
+            cartolaId={cartola.id}
+            archivoPath={cartola.archivo_path}
+            archivoNombre={cartola.archivo_nombre}
+          />
+        </div>
       </div>
 
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -20,6 +20,7 @@ type MovimientoRow = {
   evento: { id: string; nombre: string } | null;
   cuenta: { id: string; nombre: string; color: string | null } | null;
   adjuntos: { count: number }[];
+  conciliaciones: { count: number }[];
 };
 
 export default async function MovimientosPage({
@@ -33,6 +34,7 @@ export default async function MovimientosPage({
     desde?: string;
     hasta?: string;
     solo_transferencias?: string;
+    sin_cartola?: string;
   }>;
 }) {
   await requireDirectiva();
@@ -42,7 +44,7 @@ export default async function MovimientosPage({
   let q = supabase
     .from("movimientos")
     .select(
-      "id, fecha, tipo, monto, descripcion, boleta_path, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color), adjuntos:movimiento_adjuntos(count)"
+      "id, fecha, tipo, monto, descripcion, boleta_path, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color), adjuntos:movimiento_adjuntos(count), conciliaciones:conciliaciones(count)"
     )
     .order("fecha", { ascending: false })
     .order("created_at", { ascending: false })
@@ -59,7 +61,14 @@ export default async function MovimientosPage({
   if (params.solo_transferencias === "1") q = q.eq("es_transferencia", true);
 
   const { data } = await q;
-  const movimientos = (data as unknown as MovimientoRow[] | null) ?? [];
+  let movimientos = (data as unknown as MovimientoRow[] | null) ?? [];
+
+  // Filtro post-query: solo movimientos sin ninguna conciliacion (sin match en cartola).
+  if (params.sin_cartola === "1") {
+    movimientos = movimientos.filter(
+      (m) => (m.conciliaciones?.[0]?.count ?? 0) === 0
+    );
+  }
 
   // Totales EXCLUYEN transferencias internas (no son plata que entra/sale del CdP).
   const total = movimientos.reduce(

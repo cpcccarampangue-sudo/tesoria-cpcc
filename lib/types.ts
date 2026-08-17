@@ -212,6 +212,16 @@ export type CartolaParseada = {
   lineas: LineaParseada[];
 };
 
+export type Conciliacion = {
+  id: string;
+  cartola_linea_id: string;
+  movimiento_id: string;
+  auto: boolean;
+  ajuste_glosa: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
 export type BalanceGeneral = {
   total_ingresos: number;
   total_egresos: number;
