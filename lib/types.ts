@@ -162,6 +162,56 @@ export type MovimientoAdjunto = {
   subido_en: string;
 };
 
+export type Cartola = {
+  id: string;
+  cuenta_id: string;
+  banco: string;
+  archivo_path: string;
+  archivo_nombre: string | null;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  filas_total: number;
+  saldo_inicial: number | null;
+  saldo_final: number | null;
+  subida_por: string | null;
+  subida_en: string;
+};
+
+export type CartolaLinea = {
+  id: string;
+  cartola_id: string;
+  fila_num: number;
+  fecha: string;
+  descripcion: string;
+  monto: number;
+  tipo: MovTipo;
+  canal: string | null;
+  saldo_despues: number | null;
+  referencia_externa: string | null;
+  conciliado: boolean;
+  created_at: string;
+};
+
+// Resultado del parser: linea sin id/cartola_id todavia (se agregan al insertar).
+export type LineaParseada = {
+  fila_num: number;
+  fecha: string;
+  descripcion: string;
+  monto: number;
+  tipo: MovTipo;
+  canal: string | null;
+  saldo_despues: number | null;
+  referencia_externa: string | null;
+};
+
+export type CartolaParseada = {
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  saldo_inicial: number | null;
+  saldo_final: number | null;
+  lineas: LineaParseada[];
+};
+
 export type BalanceGeneral = {
   total_ingresos: number;
   total_egresos: number;

@@ -379,6 +379,43 @@ create table if not exists movimiento_adjuntos (
 create index if not exists idx_movimiento_adjuntos_mov
   on movimiento_adjuntos (movimiento_id);
 
+-- === CARTOLAS (metadata del archivo Excel subido por cuenta) ===
+create table if not exists cartolas (
+  id uuid primary key default gen_random_uuid(),
+  cuenta_id uuid not null references cuentas(id) on delete restrict,
+  banco text not null,
+  archivo_path text not null,
+  archivo_nombre text,
+  fecha_inicio date,
+  fecha_fin date,
+  filas_total int not null default 0,
+  saldo_inicial numeric(12,0),
+  saldo_final numeric(12,0),
+  subida_por uuid references profiles(id) on delete set null,
+  subida_en timestamptz not null default now()
+);
+create index if not exists idx_cartolas_cuenta on cartolas (cuenta_id, fecha_inicio desc);
+
+-- === CARTOLA_LINEAS (una fila por movimiento parseado del Excel) ===
+create table if not exists cartola_lineas (
+  id uuid primary key default gen_random_uuid(),
+  cartola_id uuid not null references cartolas(id) on delete cascade,
+  fila_num int not null,
+  fecha date not null,
+  descripcion text not null,
+  monto numeric(12,0) not null check (monto > 0),
+  tipo mov_tipo not null,
+  canal text,
+  saldo_despues numeric(12,0),
+  referencia_externa text,
+  conciliado boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_cartola_lineas_cartola on cartola_lineas (cartola_id);
+create index if not exists idx_cartola_lineas_fecha on cartola_lineas (fecha desc);
+create index if not exists idx_cartola_lineas_no_conciliadas
+  on cartola_lineas (cartola_id) where not conciliado;
+
 alter table profiles           enable row level security;
 alter table apoderados         enable row level security;
 alter table estudiantes        enable row level security;
@@ -389,6 +426,8 @@ alter table cuota_periodos     enable row level security;
 alter table cuota_pagos        enable row level security;
 alter table movimientos        enable row level security;
 alter table movimiento_adjuntos enable row level security;
+alter table cartolas           enable row level security;
+alter table cartola_lineas     enable row level security;
 
 -- Drop policies existentes para poder re-ejecutar el script.
 do $$
@@ -399,7 +438,7 @@ begin
     where schemaname = 'public'
       and tablename in ('profiles','apoderados','estudiantes','categorias','cuentas',
                         'eventos','cuota_periodos','cuota_pagos','movimientos',
-                        'movimiento_adjuntos')
+                        'movimiento_adjuntos','cartolas','cartola_lineas')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -465,6 +504,12 @@ drop policy if exists adjuntos_directiva_all on movimiento_adjuntos;
 create policy adjuntos_directiva_all on movimiento_adjuntos
   for all using (is_directiva()) with check (is_directiva());
 
+-- === cartolas / cartola_lineas ===
+create policy cartolas_directiva_all on cartolas
+  for all using (is_directiva()) with check (is_directiva());
+create policy cartola_lineas_directiva_all on cartola_lineas
+  for all using (is_directiva()) with check (is_directiva());
+
 -- =============================================================================
 -- STORAGE: bucket 'boletas' (crear en Storage UI si no existe, o vía SQL)
 -- =============================================================================
@@ -473,9 +518,16 @@ insert into storage.buckets (id, name, public)
 values ('boletas', 'boletas', false)
 on conflict (id) do nothing;
 
+insert into storage.buckets (id, name, public)
+values ('cartolas', 'cartolas', false)
+on conflict (id) do nothing;
+
 drop policy if exists boletas_directiva_select on storage.objects;
 drop policy if exists boletas_directiva_insert on storage.objects;
 drop policy if exists boletas_directiva_delete on storage.objects;
+drop policy if exists cartolas_directiva_storage_select on storage.objects;
+drop policy if exists cartolas_directiva_storage_insert on storage.objects;
+drop policy if exists cartolas_directiva_storage_delete on storage.objects;
 
 create policy boletas_directiva_select on storage.objects
   for select using (bucket_id = 'boletas' and is_directiva());
@@ -483,6 +535,13 @@ create policy boletas_directiva_insert on storage.objects
   for insert with check (bucket_id = 'boletas' and is_directiva());
 create policy boletas_directiva_delete on storage.objects
   for delete using (bucket_id = 'boletas' and is_directiva());
+
+create policy cartolas_directiva_storage_select on storage.objects
+  for select using (bucket_id = 'cartolas' and is_directiva());
+create policy cartolas_directiva_storage_insert on storage.objects
+  for insert with check (bucket_id = 'cartolas' and is_directiva());
+create policy cartolas_directiva_storage_delete on storage.objects
+  for delete using (bucket_id = 'cartolas' and is_directiva());
 
 -- =============================================================================
 -- SEED: categorías iniciales (opcional, útil para arrancar)
