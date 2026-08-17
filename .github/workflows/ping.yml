@@ -1,23 +1,58 @@
 name: Ping anti-pausa Supabase
 
-# Cada 3 días hace una consulta trivial para que Supabase no pause el proyecto.
+# Consulta diaria a Supabase para que el proyecto Free no se pause por
+# inactividad (Supabase pausa tras 7 dias sin actividad en la DB).
+#
+# Diseño: se ataca DIRECTO al REST de Supabase con la service_role key,
+# NO via la app Vercel. Asi el ping funciona aunque la app este caida
+# (evitamos el chicken-and-egg que nos paso en agosto 2026).
+#
+# Secretos requeridos en el repo (Settings → Secrets and variables → Actions):
+#   - SUPABASE_URL              (ej: https://aotgbavokblzjdjwrxnh.supabase.co)
+#   - SUPABASE_SERVICE_ROLE_KEY (Legacy service_role key, empieza con eyJ...)
+#   - APP_URL                   (opcional, ej: https://tesoria-cpcc.vercel.app)
+
 on:
   schedule:
-    - cron: "0 12 */3 * *"
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Health check
+      - name: Ping directo a Supabase (mantiene la DB activa)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::Faltan secretos SUPABASE_URL y/o SUPABASE_SERVICE_ROLE_KEY"
+            exit 1
+          fi
+          echo "Consultando $SUPABASE_URL/rest/v1/categorias ..."
+          HTTP_CODE=$(curl -sS -o /tmp/ping.out -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/categorias?select=id&limit=1" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          echo "HTTP $HTTP_CODE"
+          head -c 300 /tmp/ping.out || true
+          echo ""
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Supabase respondio $HTTP_CODE (esperado 200). Revisar secretos."
+            exit 1
+          fi
+          echo "Ping Supabase OK"
+
+      - name: Ping app (secundario, no bloqueante)
+        if: always()
         env:
           APP_URL: ${{ secrets.APP_URL }}
         run: |
           if [ -z "$APP_URL" ]; then
-            echo "Falta el secreto APP_URL (ej: https://tesoria-cpcc.vercel.app)"
-            exit 1
+            echo "APP_URL no seteado, saltando ping a la app"
+            exit 0
           fi
-          curl -fsS "$APP_URL/api/health" || (echo "Health check falló"; exit 1)
-          echo ""
-          echo "Ping OK"
+          curl -fsS "$APP_URL/api/health" \
+            && echo "" && echo "Ping app OK" \
+            || echo "::warning::Ping a la app fallo (no bloquea el job)"
