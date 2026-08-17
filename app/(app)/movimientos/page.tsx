@@ -19,6 +19,7 @@ type MovimientoRow = {
   categoria: { nombre: string } | null;
   evento: { id: string; nombre: string } | null;
   cuenta: { id: string; nombre: string; color: string | null } | null;
+  adjuntos: { count: number }[];
 };
 
 export default async function MovimientosPage({
@@ -41,7 +42,7 @@ export default async function MovimientosPage({
   let q = supabase
     .from("movimientos")
     .select(
-      "id, fecha, tipo, monto, descripcion, boleta_path, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color)"
+      "id, fecha, tipo, monto, descripcion, boleta_path, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color), adjuntos:movimiento_adjuntos(count)"
     )
     .order("fecha", { ascending: false })
     .order("created_at", { ascending: false })
@@ -142,7 +143,7 @@ export default async function MovimientosPage({
                 <th className="table-th">Categoría</th>
                 <th className="table-th">Evento</th>
                 <th className="table-th">Descripción</th>
-                <th className="table-th">Boleta</th>
+                <th className="table-th">Adjuntos</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -216,7 +217,16 @@ export default async function MovimientosPage({
                       {m.descripcion || "(sin descripción)"}
                     </Link>
                   </td>
-                  <td className="table-td">{m.boleta_path ? "📎" : "—"}</td>
+                  <td className="table-td">
+                    {(() => {
+                      const n = m.adjuntos?.[0]?.count ?? 0;
+                      return n > 0 ? (
+                        <span className="text-xs">📎 {n}</span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
+                      );
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>

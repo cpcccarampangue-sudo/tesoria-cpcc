@@ -364,15 +364,31 @@ for each row execute function handle_new_user();
 -- ROW LEVEL SECURITY
 -- =============================================================================
 
-alter table profiles       enable row level security;
-alter table apoderados     enable row level security;
-alter table estudiantes    enable row level security;
-alter table categorias     enable row level security;
-alter table cuentas        enable row level security;
-alter table eventos        enable row level security;
-alter table cuota_periodos enable row level security;
-alter table cuota_pagos    enable row level security;
-alter table movimientos    enable row level security;
+-- === MOVIMIENTO_ADJUNTOS (multiples archivos por movimiento) ===
+create table if not exists movimiento_adjuntos (
+  id uuid primary key default gen_random_uuid(),
+  movimiento_id uuid not null references movimientos(id) on delete cascade,
+  storage_path text not null,
+  nombre_original text,
+  tipo text not null default 'otro'
+    check (tipo in ('boleta', 'comprobante', 'cotizacion', 'contrato', 'foto', 'otro')),
+  descripcion text,
+  subido_por uuid references profiles(id) on delete set null,
+  subido_en timestamptz not null default now()
+);
+create index if not exists idx_movimiento_adjuntos_mov
+  on movimiento_adjuntos (movimiento_id);
+
+alter table profiles           enable row level security;
+alter table apoderados         enable row level security;
+alter table estudiantes        enable row level security;
+alter table categorias         enable row level security;
+alter table cuentas            enable row level security;
+alter table eventos            enable row level security;
+alter table cuota_periodos     enable row level security;
+alter table cuota_pagos        enable row level security;
+alter table movimientos        enable row level security;
+alter table movimiento_adjuntos enable row level security;
 
 -- Drop policies existentes para poder re-ejecutar el script.
 do $$
@@ -382,7 +398,8 @@ begin
     select schemaname, tablename, policyname from pg_policies
     where schemaname = 'public'
       and tablename in ('profiles','apoderados','estudiantes','categorias','cuentas',
-                        'eventos','cuota_periodos','cuota_pagos','movimientos')
+                        'eventos','cuota_periodos','cuota_pagos','movimientos',
+                        'movimiento_adjuntos')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -441,6 +458,11 @@ create policy pagos_directiva_all on cuota_pagos
 -- === movimientos ===
 -- Solo directiva ve/edita movimientos. Apoderados usan las funciones api_*.
 create policy movimientos_directiva_all on movimientos
+  for all using (is_directiva()) with check (is_directiva());
+
+-- === movimiento_adjuntos ===
+drop policy if exists adjuntos_directiva_all on movimiento_adjuntos;
+create policy adjuntos_directiva_all on movimiento_adjuntos
   for all using (is_directiva()) with check (is_directiva());
 
 -- =============================================================================

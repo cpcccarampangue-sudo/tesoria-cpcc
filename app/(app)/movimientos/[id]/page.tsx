@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha, formatFechaHora } from "@/lib/formatters";
-import type { Movimiento } from "@/lib/types";
+import type { Movimiento, MovimientoAdjunto } from "@/lib/types";
+import { AdjuntosManager } from "@/components/adjuntos-manager";
 import { MovimientoForm } from "../movimiento-form";
-import { BoletaLink } from "./boleta-link";
 import { DeleteBtn } from "./delete-btn";
 
 export default async function MovimientoDetailPage({
@@ -47,6 +47,13 @@ export default async function MovimientoDetailPage({
     (c) => c.activa || c.id === m.cuenta_id
   );
 
+  const { data: adjuntosData } = await supabase
+    .from("movimiento_adjuntos")
+    .select("*")
+    .eq("movimiento_id", m.id)
+    .order("subido_en", { ascending: true });
+  const adjuntos = (adjuntosData as MovimientoAdjunto[] | null) ?? [];
+
   // Para transferencias internas cargamos la contraparte para mostrarla en solo-lectura.
   type Contraparte = {
     id: string;
@@ -79,7 +86,6 @@ export default async function MovimientoDetailPage({
               Creado {formatFechaHora(m.created_at)}
             </p>
           </div>
-          {m.boleta_path && <BoletaLink path={m.boleta_path} />}
         </div>
 
         <div className="card space-y-3">
@@ -156,6 +162,21 @@ export default async function MovimientoDetailPage({
           </dl>
         </div>
 
+        <div className="card">
+          <h2 className="font-semibold mb-3">Adjuntos ({adjuntos.length})</h2>
+          <p className="text-xs text-slate-500 mb-3">
+            Los adjuntos que agregues aquí se asocian solo a este lado. Para
+            adjuntar el comprobante de la transferencia electrónica, usa
+            preferentemente el lado del banco que recibió la plata.
+          </p>
+          <AdjuntosManager
+            mode="persisted"
+            movimientoId={m.id}
+            initial={adjuntos}
+            uploadPrefix={m.id}
+          />
+        </div>
+
         <div className="text-right">
           <DeleteBtn id={m.id} esTransferencia />
         </div>
@@ -182,7 +203,6 @@ export default async function MovimientoDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {m.boleta_path && <BoletaLink path={m.boleta_path} />}
           <Link
             href={`/movimientos/nuevo?tipo=${m.tipo}${
               m.evento_id ? `&evento_id=${m.evento_id}` : ""
@@ -208,8 +228,21 @@ export default async function MovimientoDetailPage({
             categoria_id: m.categoria_id,
             evento_id: m.evento_id,
             cuenta_id: m.cuenta_id,
-            boleta_path: m.boleta_path,
           }}
+        />
+      </div>
+
+      <div className="card">
+        <h2 className="font-semibold mb-3">Adjuntos ({adjuntos.length})</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Puedes adjuntar múltiples archivos: boleta, comprobante de pago,
+          cotización, contrato, foto, etc. Cada uno con su tipo y descripción.
+        </p>
+        <AdjuntosManager
+          mode="persisted"
+          movimientoId={m.id}
+          initial={adjuntos}
+          uploadPrefix={m.id}
         />
       </div>
 

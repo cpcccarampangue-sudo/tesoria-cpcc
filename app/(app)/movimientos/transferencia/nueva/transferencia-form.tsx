@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BoletaUploader } from "@/components/boleta-uploader";
+import { AdjuntosManager, type AdjuntoLocal } from "@/components/adjuntos-manager";
 import { formatCLP, formatNumber, parseCLPInput, todayISO } from "@/lib/formatters";
 import { crearTransferenciaInterna } from "../../actions";
 
@@ -39,7 +39,7 @@ export function TransferenciaForm({
     monto: "",
     descripcion: "",
   });
-  const [boletaPath, setBoletaPath] = useState<string | null>(null);
+  const [adjuntosNuevos, setAdjuntosNuevos] = useState<AdjuntoLocal[]>([]);
 
   const montoNum = parseCLPInput(form.monto);
   const origen = cuentas.find((c) => c.id === form.origen_id);
@@ -75,7 +75,7 @@ export function TransferenciaForm({
           cuenta_destino_id: form.destino_id,
           monto: montoNum,
           descripcion: descripcionFinal,
-          boleta_path: boletaPath,
+          adjuntos_nuevos: adjuntosNuevos,
         });
         setUltima({
           origen: origen?.nombre ?? "",
@@ -90,7 +90,7 @@ export function TransferenciaForm({
           monto: "",
           descripcion: "",
         }));
-        setBoletaPath(null);
+        setAdjuntosNuevos([]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
       }
@@ -231,16 +231,18 @@ export function TransferenciaForm({
       </div>
 
       <div>
-        <label className="label">Comprobante (opcional)</label>
-        <BoletaUploader
-          value={boletaPath}
-          onChange={setBoletaPath}
-          targetId="transferencia"
-        />
-        <p className="text-xs text-slate-500 mt-1">
-          Ideal subir el comprobante de la transferencia electrónica (o el
-          giro de cajero, si aplica).
+        <label className="label">Adjuntos (opcional)</label>
+        <p className="text-xs text-slate-500 mb-2">
+          Ideal subir el comprobante del giro cajero + el comprobante de la
+          transferencia electrónica. Se asocian a ambos lados de la
+          transferencia.
         </p>
+        <AdjuntosManager
+          mode="local"
+          uploadPrefix="transferencia"
+          initialLocal={adjuntosNuevos}
+          onChange={setAdjuntosNuevos}
+        />
       </div>
 
       {error && (

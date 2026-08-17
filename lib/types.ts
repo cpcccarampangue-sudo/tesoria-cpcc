@@ -134,6 +134,34 @@ export type Movimiento = {
   created_at: string;
 };
 
+export type AdjuntoTipo =
+  | "boleta"
+  | "comprobante"
+  | "cotizacion"
+  | "contrato"
+  | "foto"
+  | "otro";
+
+export const ADJUNTO_TIPO_LABEL: Record<AdjuntoTipo, string> = {
+  boleta: "Boleta",
+  comprobante: "Comprobante",
+  cotizacion: "Cotización",
+  contrato: "Contrato",
+  foto: "Foto",
+  otro: "Otro",
+};
+
+export type MovimientoAdjunto = {
+  id: string;
+  movimiento_id: string;
+  storage_path: string;
+  nombre_original: string | null;
+  tipo: AdjuntoTipo;
+  descripcion: string | null;
+  subido_por: string | null;
+  subido_en: string;
+};
+
 export type BalanceGeneral = {
   total_ingresos: number;
   total_egresos: number;

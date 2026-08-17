@@ -3,7 +3,7 @@
 import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BoletaUploader } from "@/components/boleta-uploader";
+import { AdjuntosManager, type AdjuntoLocal } from "@/components/adjuntos-manager";
 import { parseCLPInput, formatCLP, formatNumber, todayISO } from "@/lib/formatters";
 import type { MovTipo } from "@/lib/types";
 import { crearMovimiento, actualizarMovimiento } from "./actions";
@@ -34,7 +34,6 @@ type Initial = {
   categoria_id?: string | null;
   evento_id?: string | null;
   cuenta_id?: string | null;
-  boleta_path?: string | null;
 };
 
 export function MovimientoForm({
@@ -67,9 +66,7 @@ export function MovimientoForm({
     evento_id: initial?.evento_id ?? initialEventoId ?? "",
     cuenta_id: initial?.cuenta_id ?? initialCuentaId ?? "",
   });
-  const [boletaPath, setBoletaPath] = useState<string | null>(
-    initial?.boleta_path ?? null
-  );
+  const [adjuntosNuevos, setAdjuntosNuevos] = useState<AdjuntoLocal[]>([]);
   const [ultimo, setUltimo] = useState<{
     id: string;
     tipo: MovTipo;
@@ -104,13 +101,15 @@ export function MovimientoForm({
           categoria_id: form.categoria_id || null,
           evento_id: form.evento_id || null,
           cuenta_id: form.cuenta_id,
-          boleta_path: boletaPath,
         };
         if (isEdit && initial?.id) {
           await actualizarMovimiento(initial.id, payload);
           router.push(`/movimientos/${initial.id}`);
         } else {
-          const id = await crearMovimiento(payload);
+          const id = await crearMovimiento({
+            ...payload,
+            adjuntos_nuevos: adjuntosNuevos,
+          });
           setUltimo({ id, tipo: form.tipo, monto: montoNum });
           // Mantener fecha, tipo, cuenta y evento; limpiar el resto para agregar otro.
           setForm((f) => ({
@@ -122,7 +121,7 @@ export function MovimientoForm({
             evento_id: f.evento_id,
             cuenta_id: f.cuenta_id,
           }));
-          setBoletaPath(null);
+          setAdjuntosNuevos([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
@@ -279,14 +278,21 @@ export function MovimientoForm({
         />
       </div>
 
-      <div>
-        <label className="label">Boleta (imagen o PDF, opcional)</label>
-        <BoletaUploader
-          value={boletaPath}
-          onChange={setBoletaPath}
-          targetId={initial?.id ?? "nuevo"}
-        />
-      </div>
+      {!isEdit && (
+        <div>
+          <label className="label">Adjuntos (opcional)</label>
+          <p className="text-xs text-slate-500 mb-2">
+            Puedes agregar varios: boleta, comprobante, cotización, foto, etc.
+            En la vista de detalle se pueden seguir agregando después.
+          </p>
+          <AdjuntosManager
+            mode="local"
+            uploadPrefix="nuevo"
+            initialLocal={adjuntosNuevos}
+            onChange={setAdjuntosNuevos}
+          />
+        </div>
+      )}
 
       {error && (
         <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
