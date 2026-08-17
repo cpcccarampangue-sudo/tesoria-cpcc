@@ -5,6 +5,12 @@ import { registrarPago } from "./actions";
 import { formatCLP, parseCLPInput, todayISO } from "@/lib/formatters";
 import type { CuotaEstado } from "@/lib/types";
 
+type CuentaOption = {
+  id: string;
+  nombre: string;
+  es_principal: boolean;
+};
+
 export function PagoDialog({
   pagoId,
   apoderadoNombre,
@@ -13,6 +19,8 @@ export function PagoDialog({
   montoActual,
   estadoActual,
   notaActual,
+  cuentas,
+  cuentaIdActual,
 }: {
   pagoId: string;
   apoderadoNombre: string;
@@ -21,6 +29,8 @@ export function PagoDialog({
   montoActual: number;
   estadoActual: CuotaEstado;
   notaActual: string | null;
+  cuentas: CuentaOption[];
+  cuentaIdActual: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -30,6 +40,12 @@ export function PagoDialog({
   const [fecha, setFecha] = useState(todayISO());
   const [nota, setNota] = useState(notaActual ?? "");
   const [crearMov, setCrearMov] = useState(true);
+  const [cuentaId, setCuentaId] = useState<string>(
+    cuentaIdActual ??
+      cuentas.find((c) => c.es_principal)?.id ??
+      cuentas[0]?.id ??
+      ""
+  );
 
   const badgeClass =
     estadoActual === "pagada"
@@ -62,6 +78,7 @@ export function PagoDialog({
           fecha_pago: montoNum > 0 ? fecha : null,
           nota: nota.trim() || null,
           crear_movimiento: crearMov,
+          cuenta_id: crearMov ? cuentaId || null : null,
         });
         setOpen(false);
       } catch (err) {
@@ -145,6 +162,28 @@ export function PagoDialog({
                 />
                 Registrar como ingreso en el libro de caja
               </label>
+              {crearMov && (
+                <div>
+                  <label className="label">Cuenta destino</label>
+                  <select
+                    className="input"
+                    value={cuentaId}
+                    onChange={(e) => setCuentaId(e.target.value)}
+                    required
+                  >
+                    <option value="">— seleccionar —</option>
+                    {cuentas.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                        {c.es_principal ? " (principal)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500 mt-1">
+                    ¿A qué cuenta entró la plata de esta cuota?
+                  </p>
+                </div>
+              )}
               {error && (
                 <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
                   {error}

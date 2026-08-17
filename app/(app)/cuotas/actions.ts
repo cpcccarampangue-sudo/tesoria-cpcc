@@ -86,6 +86,7 @@ export async function registrarPago(input: {
   fecha_pago: string | null;
   nota: string | null;
   crear_movimiento: boolean;
+  cuenta_id: string | null;
 }) {
   const profile = await requireDirectiva();
   const supabase = await createSupabaseServerClient();
@@ -113,6 +114,23 @@ export async function registrarPago(input: {
     input.monto_pagado > 0 &&
     (input.estado === "pagada" || input.estado === "parcial")
   ) {
+    // Resolver cuenta destino: la explicita del input, o la principal como fallback.
+    let cuentaId = input.cuenta_id;
+    if (!cuentaId) {
+      const { data: principal } = await supabase
+        .from("cuentas")
+        .select("id")
+        .eq("es_principal", true)
+        .eq("activa", true)
+        .maybeSingle();
+      cuentaId = principal?.id ?? null;
+    }
+    if (!cuentaId) {
+      throw new Error(
+        "No hay una cuenta principal configurada. Ve a Cuentas y marca una como principal antes de registrar pagos."
+      );
+    }
+
     // Buscar categoría "Cuota apoderado"
     const { data: cat } = await supabase
       .from("categorias")
@@ -146,6 +164,7 @@ export async function registrarPago(input: {
           monto: input.monto_pagado,
           fecha: input.fecha_pago ?? new Date().toISOString().slice(0, 10),
           descripcion: `${per?.nombre ?? "Cuota"} — ${apo?.nombre ?? ""}`,
+          cuenta_id: cuentaId,
         })
         .eq("id", existing.id);
     } else {
@@ -156,6 +175,7 @@ export async function registrarPago(input: {
         descripcion: `${per?.nombre ?? "Cuota"} — ${apo?.nombre ?? ""}`,
         categoria_id: cat?.id ?? null,
         cuota_pago_id: input.pago_id,
+        cuenta_id: cuentaId,
         created_by: profile.id,
       });
     }
@@ -164,4 +184,5 @@ export async function registrarPago(input: {
   revalidatePath("/cuotas");
   revalidatePath("/movimientos");
   revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
 }

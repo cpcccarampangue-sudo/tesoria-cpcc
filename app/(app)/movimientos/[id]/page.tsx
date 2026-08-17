@@ -26,17 +26,26 @@ export default async function MovimientoDetailPage({
   if (!data) notFound();
   const m = data as Movimiento;
 
-  const [{ data: categorias }, { data: eventos }] = await Promise.all([
-    supabase
-      .from("categorias")
-      .select("id, nombre, tipo, activa")
-      .eq("activa", true)
-      .order("nombre"),
-    supabase
-      .from("eventos")
-      .select("id, nombre")
-      .order("nombre"),
-  ]);
+  const [{ data: categorias }, { data: eventos }, { data: cuentas }] =
+    await Promise.all([
+      supabase
+        .from("categorias")
+        .select("id, nombre, tipo, activa")
+        .eq("activa", true)
+        .order("nombre"),
+      supabase
+        .from("eventos")
+        .select("id, nombre")
+        .order("nombre"),
+      supabase
+        .from("cuentas")
+        .select("id, nombre, color, es_principal, activa")
+        .order("orden")
+        .order("nombre"),
+    ]);
+  const cuentasVisibles = (cuentas ?? []).filter(
+    (c) => c.activa || c.id === m.cuenta_id
+  );
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -73,6 +82,7 @@ export default async function MovimientoDetailPage({
         <MovimientoForm
           categorias={categorias ?? []}
           eventos={eventos ?? []}
+          cuentas={cuentasVisibles}
           initial={{
             id: m.id,
             fecha: m.fecha,
@@ -81,6 +91,7 @@ export default async function MovimientoDetailPage({
             descripcion: m.descripcion,
             categoria_id: m.categoria_id,
             evento_id: m.evento_id,
+            cuenta_id: m.cuenta_id,
             boleta_path: m.boleta_path,
           }}
         />

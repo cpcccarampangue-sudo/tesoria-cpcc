@@ -8,15 +8,18 @@ type Option = { id: string; nombre: string };
 export function MovimientosFilters({
   eventos,
   categorias,
+  cuentas,
 }: {
   eventos: Option[];
   categorias: Option[];
+  cuentas: Option[];
 }) {
   const router = useRouter();
   const sp = useSearchParams();
   const [tipo, setTipo] = useState(sp.get("tipo") ?? "");
   const [evento, setEvento] = useState(sp.get("evento_id") ?? "");
   const [categoria, setCategoria] = useState(sp.get("categoria_id") ?? "");
+  const [cuenta, setCuenta] = useState(sp.get("cuenta_id") ?? "");
   const [desde, setDesde] = useState(sp.get("desde") ?? "");
   const [hasta, setHasta] = useState(sp.get("hasta") ?? "");
 
@@ -25,6 +28,7 @@ export function MovimientosFilters({
     if (tipo) p.set("tipo", tipo);
     if (evento) p.set("evento_id", evento);
     if (categoria) p.set("categoria_id", categoria);
+    if (cuenta) p.set("cuenta_id", cuenta);
     if (desde) p.set("desde", desde);
     if (hasta) p.set("hasta", hasta);
     router.push(`/movimientos?${p.toString()}`);
@@ -33,6 +37,7 @@ export function MovimientosFilters({
     setTipo("");
     setEvento("");
     setCategoria("");
+    setCuenta("");
     setDesde("");
     setHasta("");
     router.push(`/movimientos`);
@@ -44,7 +49,7 @@ export function MovimientosFilters({
         e.preventDefault();
         apply();
       }}
-      className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end"
+      className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end"
     >
       <div>
         <label className="label">Tipo</label>
@@ -67,6 +72,21 @@ export function MovimientosFilters({
         >
           <option value="">Todas</option>
           {categorias.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="label">Cuenta</label>
+        <select
+          className="input"
+          value={cuenta}
+          onChange={(e) => setCuenta(e.target.value)}
+        >
+          <option value="">Todas</option>
+          {cuentas.map((c) => (
             <option key={c.id} value={c.id}>
               {c.nombre}
             </option>
@@ -106,7 +126,7 @@ export function MovimientosFilters({
           onChange={(e) => setHasta(e.target.value)}
         />
       </div>
-      <div className="col-span-2 sm:col-span-5 flex gap-2">
+      <div className="col-span-2 sm:col-span-6 flex gap-2">
         <button className="btn-primary">Aplicar filtros</button>
         <button type="button" className="btn-secondary" onClick={clear}>
           Limpiar

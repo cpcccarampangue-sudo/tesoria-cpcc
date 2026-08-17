@@ -12,12 +12,16 @@ type MovInput = {
   descripcion: string | null;
   categoria_id: string | null;
   evento_id: string | null;
+  cuenta_id: string;
   boleta_path?: string | null;
 };
 
 export async function crearMovimiento(input: MovInput) {
   const profile = await requireDirectiva();
   const supabase = await createSupabaseServerClient();
+  if (!input.cuenta_id) {
+    throw new Error("Debes seleccionar una cuenta para el movimiento.");
+  }
   const { data, error } = await supabase
     .from("movimientos")
     .insert({
@@ -27,6 +31,7 @@ export async function crearMovimiento(input: MovInput) {
       descripcion: input.descripcion,
       categoria_id: input.categoria_id,
       evento_id: input.evento_id,
+      cuenta_id: input.cuenta_id,
       boleta_path: input.boleta_path ?? null,
       created_by: profile.id,
     })
@@ -35,6 +40,7 @@ export async function crearMovimiento(input: MovInput) {
   if (error) throw new Error(error.message);
   revalidatePath("/movimientos");
   revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
   revalidatePath("/eventos");
   if (input.evento_id) revalidatePath(`/eventos/${input.evento_id}`);
   return data.id;
@@ -43,6 +49,9 @@ export async function crearMovimiento(input: MovInput) {
 export async function actualizarMovimiento(id: string, input: MovInput) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
+  if (!input.cuenta_id) {
+    throw new Error("Debes seleccionar una cuenta para el movimiento.");
+  }
   const { error } = await supabase
     .from("movimientos")
     .update({
@@ -52,6 +61,7 @@ export async function actualizarMovimiento(id: string, input: MovInput) {
       descripcion: input.descripcion,
       categoria_id: input.categoria_id,
       evento_id: input.evento_id,
+      cuenta_id: input.cuenta_id,
       ...(input.boleta_path !== undefined
         ? { boleta_path: input.boleta_path }
         : {}),
@@ -61,6 +71,7 @@ export async function actualizarMovimiento(id: string, input: MovInput) {
   revalidatePath("/movimientos");
   revalidatePath(`/movimientos/${id}`);
   revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
   revalidatePath("/eventos");
 }
 
@@ -83,6 +94,7 @@ export async function eliminarMovimiento(id: string) {
   }
   revalidatePath("/movimientos");
   revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
   revalidatePath("/eventos");
   if (mov?.evento_id) revalidatePath(`/eventos/${mov.evento_id}`);
 }

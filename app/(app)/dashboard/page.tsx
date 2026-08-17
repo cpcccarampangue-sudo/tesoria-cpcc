@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha } from "@/lib/formatters";
 import type {
   BalanceGeneral,
+  BalancePorCuenta,
   BalancePorEvento,
   CuotaEstadoApoderado,
 } from "@/lib/types";
@@ -31,6 +32,13 @@ export default async function DashboardPage() {
   );
   const eventosBalance =
     (eventosBalanceData as BalancePorEvento[] | null) ?? [];
+
+  // Balance por cuenta — todos lo ven (agregado, sin filas de movimientos)
+  const { data: cuentasBalanceData } = await supabase.rpc(
+    "api_balance_por_cuenta"
+  );
+  const cuentasBalance =
+    (cuentasBalanceData as BalancePorCuenta[] | null) ?? [];
 
   return (
     <div className="space-y-6">
@@ -72,6 +80,60 @@ export default async function DashboardPage() {
           </div>
         </div>
       </section>
+
+      {/* Saldo por cuenta */}
+      {cuentasBalance.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Saldo por cuenta
+            </h2>
+            {esDirectiva && (
+              <Link
+                href="/cuentas"
+                className="text-sm text-brand-600 hover:underline"
+              >
+                Administrar →
+              </Link>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {cuentasBalance.map((c) => (
+              <div
+                key={c.id}
+                className="card border-l-4"
+                style={{ borderLeftColor: c.color ?? "#94a3b8" }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs uppercase text-slate-500 font-medium truncate">
+                      {c.nombre}
+                    </div>
+                    {c.titular && (
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {c.titular}
+                      </div>
+                    )}
+                  </div>
+                  {c.es_principal && (
+                    <span className="badge-blue text-[10px]">principal</span>
+                  )}
+                </div>
+                <div
+                  className={`text-2xl font-bold mt-2 ${
+                    Number(c.saldo) >= 0 ? "text-slate-900" : "text-red-700"
+                  }`}
+                >
+                  {formatCLP(c.saldo)}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {c.movimientos_count} movimiento(s)
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Contenido específico por rol */}
       {esDirectiva ? (

@@ -17,6 +17,7 @@ type MovimientoRow = {
   boleta_path: string | null;
   categoria: { nombre: string } | null;
   evento: { id: string; nombre: string } | null;
+  cuenta: { id: string; nombre: string; color: string | null } | null;
 };
 
 export default async function MovimientosPage({
@@ -26,6 +27,7 @@ export default async function MovimientosPage({
     tipo?: string;
     evento_id?: string;
     categoria_id?: string;
+    cuenta_id?: string;
     desde?: string;
     hasta?: string;
   }>;
@@ -37,7 +39,7 @@ export default async function MovimientosPage({
   let q = supabase
     .from("movimientos")
     .select(
-      "id, fecha, tipo, monto, descripcion, boleta_path, categoria:categoria_id(nombre), evento:evento_id(id,nombre)"
+      "id, fecha, tipo, monto, descripcion, boleta_path, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color)"
     )
     .order("fecha", { ascending: false })
     .order("created_at", { ascending: false })
@@ -48,6 +50,7 @@ export default async function MovimientosPage({
   }
   if (params.evento_id) q = q.eq("evento_id", params.evento_id);
   if (params.categoria_id) q = q.eq("categoria_id", params.categoria_id);
+  if (params.cuenta_id) q = q.eq("cuenta_id", params.cuenta_id);
   if (params.desde) q = q.gte("fecha", params.desde);
   if (params.hasta) q = q.lte("fecha", params.hasta);
 
@@ -63,10 +66,16 @@ export default async function MovimientosPage({
     { ing: 0, egr: 0 }
   );
 
-  const [{ data: eventos }, { data: categorias }] = await Promise.all([
-    supabase.from("eventos").select("id, nombre").order("nombre"),
-    supabase.from("categorias").select("id, nombre").order("nombre"),
-  ]);
+  const [{ data: eventos }, { data: categorias }, { data: cuentas }] =
+    await Promise.all([
+      supabase.from("eventos").select("id, nombre").order("nombre"),
+      supabase.from("categorias").select("id, nombre").order("nombre"),
+      supabase
+        .from("cuentas")
+        .select("id, nombre")
+        .order("orden")
+        .order("nombre"),
+    ]);
 
   return (
     <div className="space-y-4">
@@ -97,6 +106,7 @@ export default async function MovimientosPage({
         <MovimientosFilters
           eventos={eventos ?? []}
           categorias={categorias ?? []}
+          cuentas={cuentas ?? []}
         />
       </div>
 
@@ -112,6 +122,7 @@ export default async function MovimientosPage({
                 <th className="table-th">Fecha</th>
                 <th className="table-th">Tipo</th>
                 <th className="table-th text-right">Monto</th>
+                <th className="table-th">Cuenta</th>
                 <th className="table-th">Categoría</th>
                 <th className="table-th">Evento</th>
                 <th className="table-th">Descripción</th>
@@ -138,6 +149,22 @@ export default async function MovimientosPage({
                   >
                     {m.tipo === "ingreso" ? "+" : "−"}
                     {formatCLP(m.monto)}
+                  </td>
+                  <td className="table-td">
+                    {m.cuenta ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full"
+                          style={{
+                            backgroundColor: m.cuenta.color ?? "#94a3b8",
+                          }}
+                          aria-hidden
+                        />
+                        {m.cuenta.nombre}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="table-td">{m.categoria?.nombre ?? "—"}</td>
                   <td className="table-td">

@@ -87,6 +87,27 @@ create table if not exists categorias (
   activa boolean not null default true
 );
 
+-- === CUENTAS (bancarias / efectivo) ===
+-- Cada movimiento pertenece a una cuenta. Modela las 3 "ubicaciones" reales
+-- de la plata: Banco Estado del CdP (principal), Banco Chile Cta FAN (operativa)
+-- y caja chica (efectivo).
+create table if not exists cuentas (
+  id uuid primary key default gen_random_uuid(),
+  nombre text not null unique,
+  tipo text not null check (tipo in ('banco', 'efectivo', 'otro')),
+  banco text,
+  titular text,
+  numero_cuenta text,
+  color text,
+  orden int not null default 0,
+  activa boolean not null default true,
+  es_principal boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_cuentas_orden on cuentas (orden, nombre);
+create unique index if not exists idx_cuentas_principal_unica
+  on cuentas (es_principal) where es_principal = true;
+
 -- === EVENTOS ===
 create table if not exists eventos (
   id uuid primary key default gen_random_uuid(),
@@ -131,14 +152,18 @@ create table if not exists movimientos (
   categoria_id uuid references categorias(id) on delete set null,
   evento_id uuid references eventos(id) on delete set null,
   cuota_pago_id uuid references cuota_pagos(id) on delete set null,
+  cuenta_id uuid references cuentas(id),
   boleta_path text,
   created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Idempotencia: si la tabla ya existia sin cuenta_id (deploy previo), agregarla.
+alter table movimientos add column if not exists cuenta_id uuid references cuentas(id);
 create index if not exists idx_movimientos_fecha on movimientos (fecha desc);
 create index if not exists idx_movimientos_evento on movimientos (evento_id);
 create index if not exists idx_movimientos_categoria on movimientos (categoria_id);
 create index if not exists idx_movimientos_cuota on movimientos (cuota_pago_id);
+create index if not exists idx_movimientos_cuenta on movimientos (cuenta_id);
 
 -- =============================================================================
 -- VISTAS de agregación (usadas por la UI para KPIs)
@@ -165,6 +190,26 @@ select
 from eventos e
 left join movimientos m on m.evento_id = e.id
 group by e.id, e.nombre, e.fecha, e.cerrado;
+
+create or replace view v_balance_por_cuenta as
+select
+  c.id,
+  c.nombre,
+  c.tipo,
+  c.banco,
+  c.titular,
+  c.color,
+  c.orden,
+  c.activa,
+  c.es_principal,
+  coalesce(sum(m.monto) filter (where m.tipo = 'ingreso'), 0)::numeric as ingresos,
+  coalesce(sum(m.monto) filter (where m.tipo = 'egreso'),  0)::numeric as egresos,
+  (coalesce(sum(m.monto) filter (where m.tipo = 'ingreso'), 0)
+   - coalesce(sum(m.monto) filter (where m.tipo = 'egreso'),  0))::numeric as saldo,
+  count(m.id)::int as movimientos_count
+from cuentas c
+left join movimientos m on m.cuenta_id = c.id
+group by c.id;
 
 create or replace view v_cuota_estado_apoderado as
 select
@@ -223,6 +268,13 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function api_balance_por_evento() to authenticated;
 
+create or replace function api_balance_por_cuenta()
+returns setof v_balance_por_cuenta
+language sql stable security definer set search_path = public as $$
+  select * from v_balance_por_cuenta where activa order by orden, nombre;
+$$;
+grant execute on function api_balance_por_cuenta() to authenticated;
+
 -- Trigger que crea el profile automáticamente al registrarse un usuario
 -- y lo enlaza con el apoderado existente por email (si coincide).
 
@@ -257,6 +309,7 @@ alter table profiles       enable row level security;
 alter table apoderados     enable row level security;
 alter table estudiantes    enable row level security;
 alter table categorias     enable row level security;
+alter table cuentas        enable row level security;
 alter table eventos        enable row level security;
 alter table cuota_periodos enable row level security;
 alter table cuota_pagos    enable row level security;
@@ -269,8 +322,8 @@ begin
   for r in
     select schemaname, tablename, policyname from pg_policies
     where schemaname = 'public'
-      and tablename in ('profiles','apoderados','estudiantes','categorias','eventos',
-                        'cuota_periodos','cuota_pagos','movimientos')
+      and tablename in ('profiles','apoderados','estudiantes','categorias','cuentas',
+                        'eventos','cuota_periodos','cuota_pagos','movimientos')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -300,6 +353,12 @@ create policy estudiantes_self_select on estudiantes
 create policy categorias_all_authenticated_select on categorias
   for select using (auth.uid() is not null);
 create policy categorias_directiva_write on categorias
+  for all using (is_directiva()) with check (is_directiva());
+
+-- === cuentas ===
+create policy cuentas_all_authenticated_select on cuentas
+  for select using (auth.uid() is not null);
+create policy cuentas_directiva_write on cuentas
   for all using (is_directiva()) with check (is_directiva());
 
 -- === eventos ===
@@ -362,6 +421,13 @@ insert into categorias (nombre, tipo, activa) values
   ('Transporte', 'egreso', true),
   ('Servicios', 'egreso', true),
   ('Otro egreso', 'egreso', true)
+on conflict (nombre) do nothing;
+
+-- === SEED: 3 cuentas iniciales (Banco Estado, Banco Chile, Caja Chica) ===
+insert into cuentas (nombre, tipo, banco, titular, orden, es_principal, color) values
+  ('Banco Estado — CdP',       'banco',    'banco_estado', 'Centro de Padres',            1, true,  '#f97316'),
+  ('Banco Chile — Cuenta FAN', 'banco',    'banco_chile',  'Tesorero (a nombre del CdP)', 2, false, '#1e40af'),
+  ('Caja Chica',               'efectivo', null,           null,                          3, false, '#65a30d')
 on conflict (nombre) do nothing;
 
 -- =============================================================================

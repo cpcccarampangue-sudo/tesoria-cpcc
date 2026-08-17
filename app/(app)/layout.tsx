@@ -23,6 +23,7 @@ export default async function AppLayout({
   const navDirectiva = [
     { href: "/dashboard", label: "Inicio" },
     { href: "/movimientos", label: "Movimientos" },
+    { href: "/cuentas", label: "Cuentas" },
     { href: "/cuotas", label: "Cuotas" },
     { href: "/eventos", label: "Eventos" },
     { href: "/apoderados", label: "Familias" },

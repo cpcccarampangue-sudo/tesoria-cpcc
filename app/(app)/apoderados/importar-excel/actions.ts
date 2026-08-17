@@ -253,6 +253,16 @@ async function runImportFromBytes(
   const profile = await requireDirectiva();
   const admin = createSupabaseAdminClient();
 
+  // Cuenta principal usada como default para los movimientos generados por
+  // la sincronizacion masiva (cuotas y egreso agregado de agendas).
+  const { data: cuentaPrincipal } = await admin
+    .from("cuentas")
+    .select("id")
+    .eq("es_principal", true)
+    .eq("activa", true)
+    .maybeSingle();
+  const cuentaPrincipalId = cuentaPrincipal?.id ?? null;
+
   const wb = XLSX.read(bytes, { type: "array" });
 
   // Preferir hoja "Socios" (Google Sheets oficial). Fallback: Sheet1, primera.
@@ -711,6 +721,7 @@ async function runImportFromBytes(
           }`,
           categoria_id: catCuota?.id ?? null,
           cuota_pago_id: p.id,
+          cuenta_id: cuentaPrincipalId,
           created_by: profile.id,
         };
       });
@@ -786,6 +797,7 @@ async function runImportFromBytes(
           monto: totalEgreso,
           descripcion: desc,
           categoria_id: catAgendasId,
+          cuenta_id: cuentaPrincipalId,
           created_by: profile.id,
         });
       }

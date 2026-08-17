@@ -57,6 +57,38 @@ export type Categoria = {
   activa: boolean;
 };
 
+export type CuentaTipo = "banco" | "efectivo" | "otro";
+
+export type Cuenta = {
+  id: string;
+  nombre: string;
+  tipo: CuentaTipo;
+  banco: string | null;
+  titular: string | null;
+  numero_cuenta: string | null;
+  color: string | null;
+  orden: number;
+  activa: boolean;
+  es_principal: boolean;
+  created_at: string;
+};
+
+export type BalancePorCuenta = {
+  id: string;
+  nombre: string;
+  tipo: CuentaTipo;
+  banco: string | null;
+  titular: string | null;
+  color: string | null;
+  orden: number;
+  activa: boolean;
+  es_principal: boolean;
+  ingresos: number;
+  egresos: number;
+  saldo: number;
+  movimientos_count: number;
+};
+
 export type Evento = {
   id: string;
   nombre: string;
@@ -94,6 +126,7 @@ export type Movimiento = {
   categoria_id: string | null;
   evento_id: string | null;
   cuota_pago_id: string | null;
+  cuenta_id: string;
   boleta_path: string | null;
   created_by: string | null;
   created_at: string;

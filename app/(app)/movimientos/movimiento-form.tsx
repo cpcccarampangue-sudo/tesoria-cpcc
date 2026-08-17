@@ -17,6 +17,14 @@ type CategoriaOption = {
 
 type EventoOption = { id: string; nombre: string };
 
+type CuentaOption = {
+  id: string;
+  nombre: string;
+  color: string | null;
+  es_principal: boolean;
+  activa: boolean;
+};
+
 type Initial = {
   id?: string;
   fecha?: string;
@@ -25,20 +33,25 @@ type Initial = {
   descripcion?: string | null;
   categoria_id?: string | null;
   evento_id?: string | null;
+  cuenta_id?: string | null;
   boleta_path?: string | null;
 };
 
 export function MovimientoForm({
   categorias,
   eventos,
+  cuentas,
   initialTipo = "ingreso",
   initialEventoId = null,
+  initialCuentaId = "",
   initial,
 }: {
   categorias: CategoriaOption[];
   eventos: EventoOption[];
+  cuentas: CuentaOption[];
   initialTipo?: MovTipo;
   initialEventoId?: string | null;
+  initialCuentaId?: string;
   initial?: Initial;
 }) {
   const router = useRouter();
@@ -52,6 +65,7 @@ export function MovimientoForm({
     descripcion: initial?.descripcion ?? "",
     categoria_id: initial?.categoria_id ?? "",
     evento_id: initial?.evento_id ?? initialEventoId ?? "",
+    cuenta_id: initial?.cuenta_id ?? initialCuentaId ?? "",
   });
   const [boletaPath, setBoletaPath] = useState<string | null>(
     initial?.boleta_path ?? null
@@ -76,6 +90,10 @@ export function MovimientoForm({
       setError("Ingresa un monto mayor a 0.");
       return;
     }
+    if (!form.cuenta_id) {
+      setError("Debes seleccionar la cuenta a la que impacta este movimiento.");
+      return;
+    }
     startTransition(async () => {
       try {
         const payload = {
@@ -85,6 +103,7 @@ export function MovimientoForm({
           descripcion: form.descripcion.trim() || null,
           categoria_id: form.categoria_id || null,
           evento_id: form.evento_id || null,
+          cuenta_id: form.cuenta_id,
           boleta_path: boletaPath,
         };
         if (isEdit && initial?.id) {
@@ -93,7 +112,7 @@ export function MovimientoForm({
         } else {
           const id = await crearMovimiento(payload);
           setUltimo({ id, tipo: form.tipo, monto: montoNum });
-          // Mantener fecha, tipo y evento; limpiar el resto para agregar otro.
+          // Mantener fecha, tipo, cuenta y evento; limpiar el resto para agregar otro.
           setForm((f) => ({
             fecha: f.fecha,
             tipo: f.tipo,
@@ -101,6 +120,7 @@ export function MovimientoForm({
             descripcion: "",
             categoria_id: "",
             evento_id: f.evento_id,
+            cuenta_id: f.cuenta_id,
           }));
           setBoletaPath(null);
         }
@@ -188,6 +208,29 @@ export function MovimientoForm({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="label">Cuenta</label>
+          <select
+            className="input"
+            value={form.cuenta_id}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, cuenta_id: e.target.value }))
+            }
+            required
+          >
+            <option value="">— seleccionar —</option>
+            {cuentas.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+                {c.es_principal ? " (principal)" : ""}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 mt-1">
+            ¿Desde qué cuenta salió (egreso) o a qué cuenta entró (ingreso) la
+            plata?
+          </p>
+        </div>
         <div>
           <label className="label">Categoría</label>
           <select

@@ -21,7 +21,15 @@ export default async function CuotasPage() {
     .order("created_at", { ascending: false });
 
   let filas: CuotaEstadoApoderado[] = [];
-  let pagosMap: Record<string, { id: string; nota: string | null }> = {};
+  let pagosMap: Record<
+    string,
+    { id: string; nota: string | null; cuenta_id: string | null }
+  > = {};
+  let cuentasActivas: {
+    id: string;
+    nombre: string;
+    es_principal: boolean;
+  }[] = [];
 
   if (esDirectiva) {
     const { data } = await supabase
@@ -30,16 +38,36 @@ export default async function CuotasPage() {
       .order("nombre");
     filas = (data as CuotaEstadoApoderado[] | null) ?? [];
 
-    // Cargar IDs de pagos (para editar)
+    // Cargar IDs de pagos (para editar) + cuenta_id del movimiento asociado.
     const { data: pagos } = await supabase
       .from("cuota_pagos")
       .select("id, periodo_id, apoderado_id, nota");
+    const pagoIds = (pagos ?? []).map((p) => p.id);
+    const { data: movsAsociados } = pagoIds.length
+      ? await supabase
+          .from("movimientos")
+          .select("cuota_pago_id, cuenta_id")
+          .in("cuota_pago_id", pagoIds)
+      : { data: [] as { cuota_pago_id: string; cuenta_id: string }[] };
+    const cuentaPorPago = new Map<string, string>();
+    for (const m of movsAsociados ?? []) {
+      if (m.cuota_pago_id) cuentaPorPago.set(m.cuota_pago_id, m.cuenta_id);
+    }
     for (const p of pagos ?? []) {
       pagosMap[`${p.periodo_id}:${p.apoderado_id}`] = {
         id: p.id,
         nota: p.nota,
+        cuenta_id: cuentaPorPago.get(p.id) ?? null,
       };
     }
+
+    const { data: cuentas } = await supabase
+      .from("cuentas")
+      .select("id, nombre, es_principal")
+      .eq("activa", true)
+      .order("orden")
+      .order("nombre");
+    cuentasActivas = cuentas ?? [];
   } else if (profile.apoderado_id) {
     const { data } = await supabase
       .from("v_cuota_estado_apoderado")
@@ -186,6 +214,8 @@ export default async function CuotasPage() {
                             montoActual={Number(celda.pagado)}
                             estadoActual={celda.estado}
                             notaActual={pagoInfo.nota}
+                            cuentas={cuentasActivas}
+                            cuentaIdActual={pagoInfo.cuenta_id}
                           />
                         )}
                       </td>
