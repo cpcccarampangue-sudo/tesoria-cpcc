@@ -153,28 +153,37 @@ create table if not exists movimientos (
   evento_id uuid references eventos(id) on delete set null,
   cuota_pago_id uuid references cuota_pagos(id) on delete set null,
   cuenta_id uuid references cuentas(id),
+  es_transferencia boolean not null default false,
+  transferencia_par_id uuid references movimientos(id) on delete set null,
   boleta_path text,
   created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now()
 );
--- Idempotencia: si la tabla ya existia sin cuenta_id (deploy previo), agregarla.
+-- Idempotencia: si la tabla ya existia sin estas columnas (deploy previo).
 alter table movimientos add column if not exists cuenta_id uuid references cuentas(id);
+alter table movimientos add column if not exists es_transferencia boolean not null default false;
+alter table movimientos add column if not exists transferencia_par_id uuid references movimientos(id) on delete set null;
 create index if not exists idx_movimientos_fecha on movimientos (fecha desc);
 create index if not exists idx_movimientos_evento on movimientos (evento_id);
 create index if not exists idx_movimientos_categoria on movimientos (categoria_id);
 create index if not exists idx_movimientos_cuota on movimientos (cuota_pago_id);
 create index if not exists idx_movimientos_cuenta on movimientos (cuenta_id);
+create index if not exists idx_movimientos_transferencia_par
+  on movimientos (transferencia_par_id)
+  where transferencia_par_id is not null;
 
 -- =============================================================================
 -- VISTAS de agregación (usadas por la UI para KPIs)
 -- =============================================================================
 
+-- Balance general EXCLUYE transferencias internas para no inflar ingresos/egresos
+-- (una transferencia entre cuentas no es plata nueva para el CdP).
 create or replace view v_balance_general as
 select
-  coalesce(sum(monto) filter (where tipo='ingreso'), 0)::numeric as total_ingresos,
-  coalesce(sum(monto) filter (where tipo='egreso'),  0)::numeric as total_egresos,
-  (coalesce(sum(monto) filter (where tipo='ingreso'), 0)
-   - coalesce(sum(monto) filter (where tipo='egreso'),  0))::numeric as saldo
+  coalesce(sum(monto) filter (where tipo='ingreso' and not es_transferencia), 0)::numeric as total_ingresos,
+  coalesce(sum(monto) filter (where tipo='egreso'  and not es_transferencia), 0)::numeric as total_egresos,
+  (coalesce(sum(monto) filter (where tipo='ingreso' and not es_transferencia), 0)
+   - coalesce(sum(monto) filter (where tipo='egreso'  and not es_transferencia), 0))::numeric as saldo
 from movimientos;
 
 create or replace view v_balance_por_evento as
@@ -274,6 +283,56 @@ language sql stable security definer set search_path = public as $$
   select * from v_balance_por_cuenta where activa order by orden, nombre;
 $$;
 grant execute on function api_balance_por_cuenta() to authenticated;
+
+-- Crea atomicamente las 2 filas de una transferencia interna entre cuentas.
+create or replace function crear_transferencia_interna(
+  p_fecha date,
+  p_cuenta_origen uuid,
+  p_cuenta_destino uuid,
+  p_monto numeric,
+  p_descripcion text,
+  p_boleta_path text,
+  p_created_by uuid
+) returns table(mov_origen_id uuid, mov_destino_id uuid)
+language plpgsql as $$
+declare
+  v_origen_id uuid;
+  v_destino_id uuid;
+begin
+  if p_cuenta_origen is null or p_cuenta_destino is null then
+    raise exception 'Debes seleccionar cuenta origen y cuenta destino.';
+  end if;
+  if p_cuenta_origen = p_cuenta_destino then
+    raise exception 'La cuenta origen y destino no pueden ser la misma.';
+  end if;
+  if p_monto is null or p_monto <= 0 then
+    raise exception 'El monto debe ser mayor a 0.';
+  end if;
+  insert into movimientos (
+    fecha, tipo, monto, descripcion,
+    cuenta_id, es_transferencia,
+    boleta_path, created_by
+  ) values (
+    p_fecha, 'egreso', p_monto, p_descripcion,
+    p_cuenta_origen, true,
+    p_boleta_path, p_created_by
+  ) returning id into v_origen_id;
+  insert into movimientos (
+    fecha, tipo, monto, descripcion,
+    cuenta_id, es_transferencia, transferencia_par_id,
+    boleta_path, created_by
+  ) values (
+    p_fecha, 'ingreso', p_monto, p_descripcion,
+    p_cuenta_destino, true, v_origen_id,
+    p_boleta_path, p_created_by
+  ) returning id into v_destino_id;
+  update movimientos set transferencia_par_id = v_destino_id where id = v_origen_id;
+  mov_origen_id := v_origen_id;
+  mov_destino_id := v_destino_id;
+  return next;
+end;
+$$;
+grant execute on function crear_transferencia_interna(date, uuid, uuid, numeric, text, text, uuid) to authenticated;
 
 -- Trigger que crea el profile automáticamente al registrarse un usuario
 -- y lo enlaza con el apoderado existente por email (si coincide).

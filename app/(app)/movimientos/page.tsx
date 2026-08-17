@@ -15,6 +15,7 @@ type MovimientoRow = {
   monto: number;
   descripcion: string | null;
   boleta_path: string | null;
+  es_transferencia: boolean;
   categoria: { nombre: string } | null;
   evento: { id: string; nombre: string } | null;
   cuenta: { id: string; nombre: string; color: string | null } | null;
@@ -30,6 +31,7 @@ export default async function MovimientosPage({
     cuenta_id?: string;
     desde?: string;
     hasta?: string;
+    solo_transferencias?: string;
   }>;
 }) {
   await requireDirectiva();
@@ -39,7 +41,7 @@ export default async function MovimientosPage({
   let q = supabase
     .from("movimientos")
     .select(
-      "id, fecha, tipo, monto, descripcion, boleta_path, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color)"
+      "id, fecha, tipo, monto, descripcion, boleta_path, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(id,nombre), cuenta:cuenta_id(id,nombre,color)"
     )
     .order("fecha", { ascending: false })
     .order("created_at", { ascending: false })
@@ -53,12 +55,15 @@ export default async function MovimientosPage({
   if (params.cuenta_id) q = q.eq("cuenta_id", params.cuenta_id);
   if (params.desde) q = q.gte("fecha", params.desde);
   if (params.hasta) q = q.lte("fecha", params.hasta);
+  if (params.solo_transferencias === "1") q = q.eq("es_transferencia", true);
 
   const { data } = await q;
   const movimientos = (data as unknown as MovimientoRow[] | null) ?? [];
 
+  // Totales EXCLUYEN transferencias internas (no son plata que entra/sale del CdP).
   const total = movimientos.reduce(
     (acc, m) => {
+      if (m.es_transferencia) return acc;
       if (m.tipo === "ingreso") acc.ing += Number(m.monto);
       else acc.egr += Number(m.monto);
       return acc;
@@ -95,11 +100,22 @@ export default async function MovimientosPage({
             <span className="font-semibold">
               {formatCLP(total.ing - total.egr)}
             </span>
+            <span className="text-xs text-slate-500 block sm:inline sm:ml-2">
+              (transferencias internas excluidas)
+            </span>
           </p>
         </div>
-        <Link href="/movimientos/nuevo" className="btn-primary">
-          + Nuevo movimiento
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/movimientos/transferencia/nueva"
+            className="btn-secondary"
+          >
+            ↔ Nueva transferencia
+          </Link>
+          <Link href="/movimientos/nuevo" className="btn-primary">
+            + Nuevo movimiento
+          </Link>
+        </div>
       </div>
 
       <div className="card">
@@ -131,20 +147,33 @@ export default async function MovimientosPage({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {movimientos.map((m) => (
-                <tr key={m.id}>
+                <tr key={m.id} className={m.es_transferencia ? "bg-slate-50/50" : ""}>
                   <td className="table-td">{formatFecha(m.fecha)}</td>
                   <td className="table-td">
-                    <span
-                      className={
-                        m.tipo === "ingreso" ? "badge-green" : "badge-red"
-                      }
-                    >
-                      {m.tipo}
-                    </span>
+                    {m.es_transferencia ? (
+                      <span
+                        className="badge-slate"
+                        title="Transferencia interna entre cuentas"
+                      >
+                        ↔ transf.
+                      </span>
+                    ) : (
+                      <span
+                        className={
+                          m.tipo === "ingreso" ? "badge-green" : "badge-red"
+                        }
+                      >
+                        {m.tipo}
+                      </span>
+                    )}
                   </td>
                   <td
                     className={`table-td text-right font-semibold ${
-                      m.tipo === "ingreso" ? "text-green-700" : "text-red-700"
+                      m.es_transferencia
+                        ? "text-slate-600"
+                        : m.tipo === "ingreso"
+                        ? "text-green-700"
+                        : "text-red-700"
                     }`}
                   >
                     {m.tipo === "ingreso" ? "+" : "−"}

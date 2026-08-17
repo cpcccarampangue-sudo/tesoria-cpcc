@@ -127,6 +127,8 @@ export type Movimiento = {
   evento_id: string | null;
   cuota_pago_id: string | null;
   cuenta_id: string;
+  es_transferencia: boolean;
+  transferencia_par_id: string | null;
   boleta_path: string | null;
   created_by: string | null;
   created_at: string;

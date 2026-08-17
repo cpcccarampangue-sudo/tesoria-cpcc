@@ -79,24 +79,95 @@ export async function eliminarMovimiento(id: string) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
 
-  // Recuperar path de boleta para borrarla también
+  // Recuperar metadata para saber si es parte de una transferencia interna
+  // (en cuyo caso hay que borrar tambien la contraparte) y para limpiar boletas.
   const { data: mov } = await supabase
     .from("movimientos")
-    .select("boleta_path, evento_id")
+    .select(
+      "boleta_path, evento_id, es_transferencia, transferencia_par_id"
+    )
     .eq("id", id)
     .single();
 
-  const { error } = await supabase.from("movimientos").delete().eq("id", id);
+  const idsToDelete: string[] = [id];
+  const boletasToRemove: string[] = [];
+  if (mov?.boleta_path) boletasToRemove.push(mov.boleta_path);
+
+  if (mov?.es_transferencia && mov.transferencia_par_id) {
+    idsToDelete.push(mov.transferencia_par_id);
+    const { data: par } = await supabase
+      .from("movimientos")
+      .select("boleta_path")
+      .eq("id", mov.transferencia_par_id)
+      .maybeSingle();
+    if (par?.boleta_path && par.boleta_path !== mov.boleta_path) {
+      boletasToRemove.push(par.boleta_path);
+    }
+  }
+
+  const { error } = await supabase
+    .from("movimientos")
+    .delete()
+    .in("id", idsToDelete);
   if (error) throw new Error(error.message);
 
-  if (mov?.boleta_path) {
-    await supabase.storage.from("boletas").remove([mov.boleta_path]);
+  if (boletasToRemove.length > 0) {
+    await supabase.storage.from("boletas").remove(boletasToRemove);
   }
   revalidatePath("/movimientos");
   revalidatePath("/dashboard");
   revalidatePath("/cuentas");
   revalidatePath("/eventos");
   if (mov?.evento_id) revalidatePath(`/eventos/${mov.evento_id}`);
+}
+
+// === TRANSFERENCIAS INTERNAS ===
+
+type TransferenciaInput = {
+  fecha: string;
+  cuenta_origen_id: string;
+  cuenta_destino_id: string;
+  monto: number;
+  descripcion: string | null;
+  boleta_path: string | null;
+};
+
+export async function crearTransferenciaInterna(
+  input: TransferenciaInput
+): Promise<{ origenId: string; destinoId: string }> {
+  const profile = await requireDirectiva();
+  const supabase = await createSupabaseServerClient();
+
+  if (input.cuenta_origen_id === input.cuenta_destino_id) {
+    throw new Error("La cuenta origen y destino no pueden ser la misma.");
+  }
+  if (!input.monto || input.monto <= 0) {
+    throw new Error("El monto debe ser mayor a 0.");
+  }
+
+  const { data, error } = await supabase.rpc("crear_transferencia_interna", {
+    p_fecha: input.fecha,
+    p_cuenta_origen: input.cuenta_origen_id,
+    p_cuenta_destino: input.cuenta_destino_id,
+    p_monto: input.monto,
+    p_descripcion: input.descripcion,
+    p_boleta_path: input.boleta_path,
+    p_created_by: profile.id,
+  });
+  if (error) throw new Error(error.message);
+
+  const row = Array.isArray(data) ? data[0] : data;
+  const origenId = row?.mov_origen_id as string | undefined;
+  const destinoId = row?.mov_destino_id as string | undefined;
+  if (!origenId || !destinoId) {
+    throw new Error("La transferencia se ejecutó pero no devolvió IDs.");
+  }
+
+  revalidatePath("/movimientos");
+  revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
+
+  return { origenId, destinoId };
 }
 
 // Genera una signed URL temporal (1 h) para ver una boleta.
