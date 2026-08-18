@@ -23,6 +23,19 @@ function normalizarArchivoParaOrden(nombre: string | null): string {
   return nombre.toLowerCase();
 }
 
+// Muestra el nombre del archivo en un formato limpio para la tabla:
+//   - 'cartola_31072026.xls'                       -> '31/07/2026'
+//   - 'Excel_Cartola_...Electronica 6 2026.xlsx'   -> '6 · 2026'
+//   - Fallback: nombre original.
+function mostrarArchivo(nombre: string | null): string {
+  if (!nombre) return "—";
+  const bch = nombre.match(/cartola_(\d{2})(\d{2})(\d{4})\.xls/i);
+  if (bch) return `${bch[1]}/${bch[2]}/${bch[3]}`;
+  const be = nombre.match(/(\d+)\s*(\d{4})\.xlsx?/i);
+  if (be) return `${be[1]} · ${be[2]}`;
+  return nombre;
+}
+
 type SortKey =
   | "cuenta"
   | "periodo"
@@ -203,8 +216,11 @@ export function CartolasTabla({
                       : `${formatFecha(c.fecha_inicio)} → ${formatFecha(c.fecha_fin)}`
                     : "—"}
                 </td>
-                <td className="table-td text-xs text-slate-500 max-w-[16rem] truncate" title={c.archivo_nombre ?? ""}>
-                  {c.archivo_nombre ?? "—"}
+                <td
+                  className="table-td text-sm text-slate-600"
+                  title={c.archivo_nombre ?? ""}
+                >
+                  {mostrarArchivo(c.archivo_nombre)}
                 </td>
                 <td className="table-td text-right font-semibold">
                   {c.filas_total}
