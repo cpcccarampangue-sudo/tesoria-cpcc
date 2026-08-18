@@ -9,6 +9,20 @@ type CartolaRow = Cartola & {
   cuenta: { id: string; nombre: string; color: string | null } | null;
 };
 
+// Convierte el nombre del archivo en una clave que ordena cronologicamente:
+//   - Banco Chile 'cartola_DDMMYYYY.xls' -> 'YYYYMMDD'
+//   - Banco Estado 'Excel_Cartola_Historica_Chequera_Electronica N AAAA.xlsx'
+//     -> 'AAAA-Npadded' (para ordenar por año y luego numero de cartola)
+//   - Fallback: nombre lowercase.
+function normalizarArchivoParaOrden(nombre: string | null): string {
+  if (!nombre) return "";
+  const bch = nombre.match(/cartola_(\d{2})(\d{2})(\d{4})\.xls/i);
+  if (bch) return `${bch[3]}${bch[2]}${bch[1]}`;
+  const be = nombre.match(/(\d+)\s*(\d{4})\.xlsx?/i);
+  if (be) return `${be[2]}-${be[1].padStart(4, "0")}`;
+  return nombre.toLowerCase();
+}
+
 type SortKey =
   | "cuenta"
   | "periodo"
@@ -57,8 +71,9 @@ export function CartolasTabla({
           );
         case "archivo":
           return (
-            (a.archivo_nombre ?? "").localeCompare(b.archivo_nombre ?? "") *
-            mult
+            normalizarArchivoParaOrden(a.archivo_nombre).localeCompare(
+              normalizarArchivoParaOrden(b.archivo_nombre)
+            ) * mult
           );
         case "lineas":
           return (a.filas_total - b.filas_total) * mult;

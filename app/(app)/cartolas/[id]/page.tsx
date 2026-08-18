@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha, formatFechaHora } from "@/lib/formatters";
 import type { Cartola, CartolaLinea } from "@/lib/types";
 import { CartolaHeaderActions } from "./actions-btn";
+import { LineasTabla } from "./lineas-tabla";
 
 export const metadata = { title: "Cartola — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,66 @@ export default async function CartolaDetailPage({
     .order("fecha", { ascending: true })
     .order("fila_num", { ascending: true });
   const lineas = (lineasData as CartolaLinea[] | null) ?? [];
+
+  // Categorías y eventos activos para el mini-form de "Categorizar y vincular".
+  const [{ data: catData }, { data: evData }, { data: concData }] = await Promise.all([
+    supabase
+      .from("categorias")
+      .select("id, nombre, tipo, activa")
+      .eq("activa", true)
+      .order("nombre"),
+    supabase
+      .from("eventos")
+      .select("id, nombre")
+      .eq("cerrado", false)
+      .order("nombre"),
+    supabase
+      .from("conciliaciones")
+      .select("cartola_linea_id, movimiento_id, movimientos!inner(id, descripcion, fecha, monto, tipo)")
+      .in("cartola_linea_id", lineas.map((l) => l.id)),
+  ]);
+  const categorias = (catData ?? []) as Array<{
+    id: string;
+    nombre: string;
+    tipo: "ingreso" | "egreso";
+    activa: boolean;
+  }>;
+  const eventos = (evData ?? []) as Array<{ id: string; nombre: string }>;
+  const conciliacionesPorLinea = new Map<
+    string,
+    Array<{
+      movimiento_id: string;
+      descripcion: string | null;
+      fecha: string;
+      monto: number;
+      tipo: string;
+    }>
+  >();
+  for (const c of (concData ?? []) as unknown as Array<{
+    cartola_linea_id: string;
+    movimiento_id: string;
+    movimientos: {
+      id: string;
+      descripcion: string | null;
+      fecha: string;
+      monto: number;
+      tipo: string;
+    };
+  }>) {
+    const arr = conciliacionesPorLinea.get(c.cartola_linea_id) ?? [];
+    arr.push({
+      movimiento_id: c.movimiento_id,
+      descripcion: c.movimientos.descripcion,
+      fecha: c.movimientos.fecha,
+      monto: Number(c.movimientos.monto),
+      tipo: c.movimientos.tipo,
+    });
+    conciliacionesPorLinea.set(c.cartola_linea_id, arr);
+  }
+  const lineasConMovs = lineas.map((l) => ({
+    ...l,
+    movs: conciliacionesPorLinea.get(l.id) ?? [],
+  }));
 
   const totales = lineas.reduce(
     (acc, l) => {
@@ -168,51 +229,13 @@ export default async function CartolaDetailPage({
           La cartola no tiene líneas parseadas.
         </div>
       ) : (
-        <div className="card p-0 overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="table-th">Fecha</th>
-                <th className="table-th">Descripción</th>
-                <th className="table-th">Canal / Ref.</th>
-                <th className="table-th text-right">Monto</th>
-                <th className="table-th text-right">Saldo</th>
-                <th className="table-th">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {lineas.map((l) => (
-                <tr key={l.id}>
-                  <td className="table-td">{formatFecha(l.fecha)}</td>
-                  <td className="table-td max-w-md truncate">
-                    {l.descripcion}
-                  </td>
-                  <td className="table-td text-xs text-slate-500">
-                    {l.canal ?? l.referencia_externa ?? "—"}
-                  </td>
-                  <td
-                    className={`table-td text-right font-semibold ${
-                      l.tipo === "ingreso" ? "text-green-700" : "text-red-700"
-                    }`}
-                  >
-                    {l.tipo === "ingreso" ? "+" : "−"}
-                    {formatCLP(l.monto)}
-                  </td>
-                  <td className="table-td text-right text-xs text-slate-500">
-                    {l.saldo_despues != null ? formatCLP(l.saldo_despues) : "—"}
-                  </td>
-                  <td className="table-td">
-                    {l.conciliado ? (
-                      <span className="badge-green text-xs">conciliada</span>
-                    ) : (
-                      <span className="badge-slate text-xs">sin cruzar</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <LineasTabla
+          cartolaId={cartola.id}
+          cuentaId={cartola.cuenta?.id ?? ""}
+          lineas={lineasConMovs}
+          categorias={categorias}
+          eventos={eventos}
+        />
       )}
     </div>
   );

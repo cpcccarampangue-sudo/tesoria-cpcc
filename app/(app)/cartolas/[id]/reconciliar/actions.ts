@@ -226,3 +226,56 @@ export async function desconciliar(input: {
   revalidatePath(`/cartolas/${input.cartolaId}/reconciliar`);
   revalidatePath("/movimientos");
 }
+
+// Crea un movimiento nuevo directamente desde una linea de cartola y lo
+// vincula en un solo paso. Se usa desde la seccion "Sin match" para
+// categorizar rapido sin salir de la pagina de reconciliacion.
+export async function crearMovimientoYConciliar(input: {
+  cartolaId: string;
+  lineaId: string;
+  cuenta_id: string;
+  categoria_id: string | null;
+  evento_id: string | null;
+  descripcion: string;
+  fecha: string;
+  tipo: "ingreso" | "egreso";
+  monto: number;
+}): Promise<{ movId: string }> {
+  const profile = await requireDirectiva();
+  const supabase = await createSupabaseServerClient();
+
+  if (!input.cuenta_id) throw new Error("Falta cuenta.");
+  if (!input.monto || input.monto <= 0) throw new Error("Monto invalido.");
+
+  const { data, error } = await supabase
+    .from("movimientos")
+    .insert({
+      fecha: input.fecha,
+      tipo: input.tipo,
+      monto: input.monto,
+      descripcion: input.descripcion?.trim() || null,
+      categoria_id: input.categoria_id,
+      evento_id: input.evento_id,
+      cuenta_id: input.cuenta_id,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  const movId = data.id as string;
+
+  const { error: e2 } = await supabase.from("conciliaciones").insert({
+    cartola_linea_id: input.lineaId,
+    movimiento_id: movId,
+    auto: false,
+    created_by: profile.id,
+  });
+  if (e2) throw new Error(e2.message);
+
+  revalidatePath(`/cartolas/${input.cartolaId}`);
+  revalidatePath(`/cartolas/${input.cartolaId}/reconciliar`);
+  revalidatePath("/movimientos");
+  revalidatePath("/dashboard");
+  return { movId };
+}
