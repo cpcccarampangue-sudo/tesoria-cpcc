@@ -9,8 +9,14 @@ export type LibroCajaRow = {
   monto: number;
   categoria: string | null;
   evento: string | null;
+  cuenta: string | null;
   descripcion: string | null;
 };
+
+// Categorias que NO son operacionales y se excluyen de los reportes:
+//   - "Saldo apertura": ajustes contables que representan plata pre-existente
+//     al momento del switch al sistema; distorsionarian ingresos/egresos.
+const CATEGORIAS_EXCLUIDAS_REPORTES = new Set<string>(["Saldo apertura"]);
 
 export async function fetchLibroCaja(
   desde: string | null,
@@ -21,8 +27,9 @@ export async function fetchLibroCaja(
   let q = supabase
     .from("movimientos")
     .select(
-      "fecha, tipo, monto, descripcion, categoria:categoria_id(nombre), evento:evento_id(nombre)"
+      "fecha, tipo, monto, descripcion, es_transferencia, categoria:categoria_id(nombre), evento:evento_id(nombre), cuenta:cuenta_id(nombre)"
     )
+    .eq("es_transferencia", false)
     .order("fecha", { ascending: true })
     .order("created_at", { ascending: true });
   if (desde) q = q.gte("fecha", desde);
@@ -34,18 +41,25 @@ export async function fetchLibroCaja(
     tipo: string;
     monto: number;
     descripcion: string | null;
+    es_transferencia: boolean;
     categoria: { nombre: string } | null;
     evento: { nombre: string } | null;
+    cuenta: { nombre: string } | null;
   };
   const rows = (data ?? []) as unknown as Row[];
-  return rows.map((r) => ({
-    fecha: r.fecha,
-    tipo: r.tipo,
-    monto: Number(r.monto),
-    categoria: r.categoria?.nombre ?? null,
-    evento: r.evento?.nombre ?? null,
-    descripcion: r.descripcion,
-  }));
+  return rows
+    .filter(
+      (r) => !CATEGORIAS_EXCLUIDAS_REPORTES.has(r.categoria?.nombre ?? "")
+    )
+    .map((r) => ({
+      fecha: r.fecha,
+      tipo: r.tipo,
+      monto: Number(r.monto),
+      categoria: r.categoria?.nombre ?? null,
+      evento: r.evento?.nombre ?? null,
+      cuenta: r.cuenta?.nombre ?? null,
+      descripcion: r.descripcion,
+    }));
 }
 
 export type BalanceEventoRow = {

@@ -45,6 +45,7 @@ export function ReportesClient() {
           Tipo: r.tipo,
           Monto: r.monto,
           "Monto (formateado)": formatCLP(r.monto),
+          Cuenta: r.cuenta ?? "",
           Categoría: r.categoria ?? "",
           Evento: r.evento ?? "",
           Descripción: r.descripcion ?? "",
@@ -111,7 +112,8 @@ export function ReportesClient() {
       const styles = StyleSheet.create({
         page: { padding: 28, fontSize: 9 },
         title: { fontSize: 14, marginBottom: 6, fontWeight: "bold" },
-        subtitle: { fontSize: 9, marginBottom: 10, color: "#555" },
+        subtitle: { fontSize: 9, marginBottom: 4, color: "#555" },
+        nota: { fontSize: 8, marginBottom: 10, color: "#666", fontStyle: "italic" },
         row: {
           flexDirection: "row",
           borderBottom: 1,
@@ -119,12 +121,13 @@ export function ReportesClient() {
           paddingVertical: 3,
         },
         h: { fontWeight: "bold", backgroundColor: "#f3f4f6" },
-        col_fecha: { width: "12%" },
-        col_tipo: { width: "10%" },
-        col_monto: { width: "15%", textAlign: "right" },
-        col_cat: { width: "18%" },
-        col_evt: { width: "20%" },
-        col_desc: { width: "25%" },
+        col_fecha: { width: "11%" },
+        col_tipo: { width: "9%" },
+        col_monto: { width: "13%", textAlign: "right" },
+        col_cuenta: { width: "15%" },
+        col_cat: { width: "15%" },
+        col_evt: { width: "15%" },
+        col_desc: { width: "22%" },
         footer: {
           marginTop: 10,
           borderTop: 1,
@@ -148,10 +151,15 @@ export function ReportesClient() {
             <Text style={styles.subtitle}>
               {desde || "inicio"} → {hasta || "hoy"}
             </Text>
+            <Text style={styles.nota}>
+              Excluye transferencias internas entre cuentas y ajustes de saldo
+              de apertura. Muestra solo ingresos y egresos operacionales.
+            </Text>
             <View style={[styles.row, styles.h]}>
               <Text style={styles.col_fecha}>Fecha</Text>
               <Text style={styles.col_tipo}>Tipo</Text>
               <Text style={styles.col_monto}>Monto</Text>
+              <Text style={styles.col_cuenta}>Cuenta</Text>
               <Text style={styles.col_cat}>Categoría</Text>
               <Text style={styles.col_evt}>Evento</Text>
               <Text style={styles.col_desc}>Descripción</Text>
@@ -161,6 +169,7 @@ export function ReportesClient() {
                 <Text style={styles.col_fecha}>{formatFecha(r.fecha)}</Text>
                 <Text style={styles.col_tipo}>{r.tipo}</Text>
                 <Text style={styles.col_monto}>{formatCLP(r.monto)}</Text>
+                <Text style={styles.col_cuenta}>{r.cuenta ?? ""}</Text>
                 <Text style={styles.col_cat}>{r.categoria ?? ""}</Text>
                 <Text style={styles.col_evt}>{r.evento ?? ""}</Text>
                 <Text style={styles.col_desc}>{r.descripcion ?? ""}</Text>
@@ -169,7 +178,7 @@ export function ReportesClient() {
             <View style={styles.footer}>
               <Text>Ingresos: {formatCLP(totIng)}</Text>
               <Text>Egresos: {formatCLP(totEgr)}</Text>
-              <Text>Saldo: {formatCLP(totIng - totEgr)}</Text>
+              <Text>Neto del período: {formatCLP(totIng - totEgr)}</Text>
             </View>
           </Page>
         </Document>
@@ -188,6 +197,10 @@ export function ReportesClient() {
     <div className="space-y-4">
       <div className="card">
         <h2 className="font-semibold mb-3">Libro de caja</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Excluye transferencias internas entre cuentas y ajustes de saldo de
+          apertura. Muestra solo ingresos y egresos operacionales.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <div>
             <label className="label">Desde</label>
