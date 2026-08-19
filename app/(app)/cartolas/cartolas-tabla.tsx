@@ -24,15 +24,17 @@ function normalizarArchivoParaOrden(nombre: string | null): string {
 }
 
 // Muestra el nombre del archivo en un formato limpio para la tabla:
-//   - 'cartola_31072026.xls'                       -> '31/07/2026'
-//   - 'Excel_Cartola_...Electronica 6 2026.xlsx'   -> '6 · 2026'
+//   - 'cartola_31072026.xls'                              -> '31/07/2026'
+//   - 'Excel_Cartola_...Electronica 6 2026.xlsx'          -> '6-2026'
+//   - 'Excel_Cartola_...Electronica (1) 2026.xlsx'        -> '1-2026'
 //   - Fallback: nombre original.
 function mostrarArchivo(nombre: string | null): string {
   if (!nombre) return "—";
   const bch = nombre.match(/cartola_(\d{2})(\d{2})(\d{4})\.xls/i);
   if (bch) return `${bch[1]}/${bch[2]}/${bch[3]}`;
-  const be = nombre.match(/(\d+)\s*(\d{4})\.xlsx?/i);
-  if (be) return `${be[1]} · ${be[2]}`;
+  // BE: acepta 'N AAAA' o '(N) AAAA' con parentesis opcionales.
+  const be = nombre.match(/\(?(\d+)\)?\s+(\d{4})\.xlsx?/i);
+  if (be) return `${be[1]}-${be[2]}`;
   return nombre;
 }
 
