@@ -52,12 +52,23 @@ export default async function EventoDetailPage({
           </p>
         </div>
         {esDirectiva && (
-          <Link
-            href={`/movimientos/nuevo?evento_id=${id}`}
-            className="btn-primary"
-          >
-            + Movimiento en este evento
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/imprimir/eventos/${id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary"
+              title="Abre una vista para imprimir o guardar como PDF, con las boletas anexas"
+            >
+              🖨️ Imprimir / PDF
+            </Link>
+            <Link
+              href={`/movimientos/nuevo?evento_id=${id}`}
+              className="btn-primary"
+            >
+              + Movimiento en este evento
+            </Link>
+          </div>
         )}
       </div>
 
