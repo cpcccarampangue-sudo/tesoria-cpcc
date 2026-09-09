@@ -97,24 +97,15 @@ export default async function ImprimirEventoPage({
   };
   const brutos: Bruto[] = [];
   const movById = new Map(movimientos.map((m) => [m.id, m]));
-  for (const m of movimientos) {
-    if (m.boleta_path) {
-      brutos.push({
-        key: `legacy-${m.id}`,
-        movimientoId: m.id,
-        fecha: m.fecha,
-        monto: m.monto,
-        descripcion: m.descripcion,
-        tipoMov: m.tipo,
-        tipoAdj: "boleta",
-        nombre: m.boleta_path.split("/").pop() ?? "boleta",
-        path: m.boleta_path,
-      });
-    }
-  }
+  // Deduplicacion por storage_path: si la misma boleta esta como legacy y
+  // como adjunto nuevo (o dos veces por transferencia interna), la mostramos
+  // una sola vez. Preferimos siempre el adjunto nuevo (tiene mejor metadata).
+  const pathsVistos = new Set<string>();
   for (const a of adjuntos) {
+    if (pathsVistos.has(a.storage_path)) continue;
     const m = movById.get(a.movimiento_id);
     if (!m) continue;
+    pathsVistos.add(a.storage_path);
     brutos.push({
       key: `adj-${a.id}`,
       movimientoId: m.id,
@@ -127,6 +118,25 @@ export default async function ImprimirEventoPage({
       path: a.storage_path,
     });
   }
+  for (const m of movimientos) {
+    if (!m.boleta_path) continue;
+    if (pathsVistos.has(m.boleta_path)) continue;
+    pathsVistos.add(m.boleta_path);
+    brutos.push({
+      key: `legacy-${m.id}`,
+      movimientoId: m.id,
+      fecha: m.fecha,
+      monto: m.monto,
+      descripcion: m.descripcion,
+      tipoMov: m.tipo,
+      tipoAdj: "boleta",
+      nombre: m.boleta_path.split("/").pop() ?? "boleta",
+      path: m.boleta_path,
+    });
+  }
+
+  // Ordenar cronologicamente para que el anexo siga el mismo orden que la tabla.
+  brutos.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
 
   const firmadas = await Promise.all(
     brutos.map(async (b) => {
