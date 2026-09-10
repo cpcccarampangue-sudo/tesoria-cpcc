@@ -203,6 +203,17 @@ export default async function MovimientoDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {m.tipo === "egreso" && (
+            <Link
+              href={`/imprimir/movimientos/${m.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-secondary"
+              title="Genera un acta de recibo de dineros lista para imprimir y firmar"
+            >
+              🧾 Generar acta
+            </Link>
+          )}
           <Link
             href={`/movimientos/nuevo?tipo=${m.tipo}${
               m.evento_id ? `&evento_id=${m.evento_id}` : ""
