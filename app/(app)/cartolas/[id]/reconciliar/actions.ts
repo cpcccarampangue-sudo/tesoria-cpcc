@@ -10,7 +10,7 @@ import type {
   ResultadoMatch,
 } from "@/lib/cartolas/matcher";
 
-// Recalcula el matching entre lineas sin conciliar de una cartola y los
+// Recalcula las coincidencias entre lineas sin conciliar de una cartola y los
 // movimientos disponibles en la misma cuenta, dentro de la ventana temporal.
 // No inserta nada — solo devuelve el analisis para pintar la UI.
 export async function analizarReconciliacion(
@@ -150,8 +150,8 @@ export async function analizarReconciliacion(
   return { resultado, lineasIndex, movsIndex };
 }
 
-// Inserta todas las conciliaciones automaticas de una vez (los matches
-// exactos 1:1 que devuelve calcularMatches).
+// Inserta todas las conciliaciones automaticas de una vez (las coincidencias
+// exactas 1:1 que devuelve calcularMatches).
 export async function confirmarMatchesAutomaticos(input: {
   cartolaId: string;
   pares: Array<{ lineaId: string; movimientoId: string }>;
@@ -228,7 +228,7 @@ export async function desconciliar(input: {
 }
 
 // Crea un movimiento nuevo directamente desde una linea de cartola y lo
-// vincula en un solo paso. Se usa desde la seccion "Sin match" para
+// vincula en un solo paso. Se usa desde la seccion "Sin coincidencia" para
 // categorizar rapido sin salir de la pagina de reconciliacion.
 export async function crearMovimientoYConciliar(input: {
   cartolaId: string;

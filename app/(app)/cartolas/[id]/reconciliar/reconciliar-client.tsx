@@ -77,7 +77,7 @@ export function ReconciliarClient({
       seleccionadosExactos.has(e.linea_id)
     );
     if (pares.length === 0) {
-      setError("No hay matches seleccionados.");
+      setError("No hay coincidencias seleccionadas.");
       return;
     }
     startTransition(async () => {
@@ -154,12 +154,12 @@ export function ReconciliarClient({
         </div>
       )}
 
-      {/* Sección 1: Matches automáticos */}
+      {/* Sección 1: Coincidencias automáticas */}
       {resultado.exactos.length > 0 && (
         <section className="card space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">
-              Matches automáticos ({totalExactos})
+              Coincidencias automáticas ({totalExactos})
             </h2>
             <button
               className="btn-primary text-sm"
@@ -168,7 +168,7 @@ export function ReconciliarClient({
             >
               {pending
                 ? "Guardando..."
-                : `Confirmar ${seleccionadosExactos.size} match(es)`}
+                : `Confirmar ${seleccionadosExactos.size} coincidencia(s)`}
             </button>
           </div>
           <p className="text-xs text-slate-500">
@@ -339,16 +339,16 @@ export function ReconciliarClient({
         </section>
       )}
 
-      {/* Sección 3: Sin match */}
+      {/* Sección 3: Sin coincidencia */}
       {lineasSinMatch.length > 0 && (
         <section className="card space-y-3">
           <h2 className="font-semibold">
-            Sin match ({lineasSinMatch.length})
+            Sin coincidencia ({lineasSinMatch.length})
           </h2>
           <p className="text-xs text-slate-500">
             Líneas del banco que no encontraron movimiento con mismo monto
             en ±3 días. Vincúlala manualmente con un movimiento existente o
-            crea uno nuevo desde el link.
+            crea uno nuevo desde el enlace.
           </p>
           <ul className="space-y-3">
             {lineasSinMatch.map((l) => (

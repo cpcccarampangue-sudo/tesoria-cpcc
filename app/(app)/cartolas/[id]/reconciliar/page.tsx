@@ -107,14 +107,16 @@ export default async function ReconciliarPage({
         </div>
         <div className="card">
           <div className="text-xs uppercase text-slate-500">
-            Match automático
+            Coincidencia automática
           </div>
           <div className="text-2xl font-semibold text-blue-700 mt-1">
             {analisis.resultado.exactos.length}
           </div>
         </div>
         <div className="card">
-          <div className="text-xs uppercase text-slate-500">Sin match</div>
+          <div className="text-xs uppercase text-slate-500">
+            Sin coincidencia
+          </div>
           <div className="text-2xl font-semibold text-amber-700 mt-1">
             {analisis.resultado.sin_match_ids.length}
           </div>
