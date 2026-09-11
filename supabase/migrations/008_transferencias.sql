@@ -66,7 +66,7 @@ begin
     p_boleta_path, p_created_by
   ) returning id into v_origen_id;
 
-  -- Ingreso en la cuenta destino, ya linkeado al origen
+  -- Ingreso en la cuenta destino, ya vinculado al origen
   insert into movimientos (
     fecha, tipo, monto, descripcion,
     cuenta_id, es_transferencia, transferencia_par_id,

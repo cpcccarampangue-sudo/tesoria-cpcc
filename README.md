@@ -179,7 +179,7 @@ La app corre en Vercel Hobby bajo el team institucional (correo `cpcc.carampangu
 
 ### Cambiar env vars después del deploy
 
-Cambiar env vars en Vercel **NO dispara un redeploy automático**. Después de editar, andá a **Deployments** → 3 puntos del último → **Redeploy** → confirmar (dejando el checkbox de build cache marcado).
+Cambiar env vars en Vercel **NO dispara un redeploy automático**. Después de editar, ve a **Deployments** → 3 puntos del último → **Redeploy** → confirmar (dejando el checkbox de build cache marcado).
 
 ---
 
@@ -193,11 +193,11 @@ Cambiar env vars en Vercel **NO dispara un redeploy automático**. Después de e
    update profiles set role = 'directiva' where email = 'tucorreo@ejemplo.cl';
    ```
 5. Refresca la página en el navegador. Ahora verás el panel completo de directiva.
-6. Desde `/usuarios` en la app podés cambiar el rol de otras cuentas (a **directiva** o **delegado**) sin tener que volver a tocar SQL, y también vincular manualmente cada cuenta con la familia correspondiente si el trigger automático no lo hizo.
+6. Desde `/usuarios` en la app puedes cambiar el rol de otras cuentas (a **directiva** o **delegado**) sin tener que volver a tocar SQL, y también vincular manualmente cada cuenta con la familia correspondiente si el trigger automático no lo hizo.
 
 ### Vinculación automática de cuentas a familias
 
-Al crear un usuario, un trigger de Supabase intenta vincularlo con la familia cuyo `contactos.email` coincida con el correo de registro. Si el correo se agrega al sheet **después** de que la persona ya se registró, corre una sincronización desde `/apoderados/sincronizar` — al final del sync, se retro-vinculan las cuentas huérfanas. También podés vincular a mano desde `/usuarios` en el dropdown "Familia vinculada".
+Al crear un usuario, un trigger de Supabase intenta vincularlo con la familia cuyo `contactos.email` coincida con el correo de registro. Si el correo se agrega al sheet **después** de que la persona ya se registró, corre una sincronización desde `/apoderados/sincronizar` — al final del sync, se retro-vinculan las cuentas huérfanas. También puedes vincular a mano desde `/usuarios` en el desplegable "Familia vinculada".
 
 ---
 
@@ -254,7 +254,7 @@ Para probar el backup manualmente: ve a **Actions → Backup semanal Supabase �
 Como directiva, en `/usuarios` puedes eliminar su cuenta y pedirle que vuelva a crearla con el mismo correo (queda vinculada de nuevo automáticamente por email). Alternativa: en Supabase → **Authentication → Users** → busca el correo → menú de 3 puntos → **Send password recovery**.
 
 **Un apoderado dice que ingresó pero no ve sus cuotas.**
-Su cuenta quedó sin vincular a la familia. En `/usuarios`, en la fila de esa persona, elige la familia correcta en el dropdown **Familia vinculada** y guarda. Si su correo estaba en el sheet cuando corriste el último sync, la vinculación debería haber sido automática — verifica que su correo en Supabase Auth coincida exactamente con el que está cargado como contacto de la familia (no importan mayúsculas).
+Su cuenta quedó sin vincular a la familia. En `/usuarios`, en la fila de esa persona, elige la familia correcta en el desplegable **Familia vinculada** y guarda. Si su correo estaba en la hoja cuando corriste la última sincronización, la vinculación debería haber sido automática — verifica que su correo en Supabase Auth coincida exactamente con el que está cargado como contacto de la familia (no importan mayúsculas).
 
 **El deploy en Vercel sale "Blocked".**
 Ese error significa que el commit fue firmado por un correo distinto al del dueño del team Vercel. En Hobby con repo privado no se permite colaboración. Fix: asegúrate de que `git config user.email` sea el mismo correo institucional del team Vercel antes de commitear. Ver sección 5, "Requisitos importantes".

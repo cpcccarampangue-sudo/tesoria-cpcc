@@ -33,7 +33,7 @@ const CARGOS_VALIDOS: DirectivaCargo[] = [
   "director",
 ];
 
-// Firmante = miembro real de la directiva, o fallback hardcoded (solo tesorero).
+// Firmante = miembro real de la directiva, o valor por defecto (solo tesorero).
 type Firmante = { cargo: DirectivaCargo; nombre: string; rut: string };
 
 function parseFirmantes(raw: string | string[] | undefined): DirectivaCargo[] {
@@ -94,7 +94,7 @@ export default async function ImprimirActaMovimientoPage({
   }
 
   // Resolver firmantes: buscar miembro activo por cargo. Si no hay y el cargo
-  // es "tesorero", caemos al hardcoded para no romper la funcionalidad.
+  // es "tesorero", caemos al valor por defecto para no romper la funcionalidad.
   const firmantes: Firmante[] = [];
   for (const cargo of cargosPedidos) {
     const miembro = directivaActiva.find((d) => d.cargo === cargo);

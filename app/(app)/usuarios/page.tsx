@@ -39,7 +39,7 @@ export default async function UsuariosPage() {
     .order("nombre");
   const familias = (apoderadosRaw ?? []) as { id: string; nombre: string }[];
 
-  // Cursos disponibles para el dropdown de delegados
+  // Cursos disponibles para el desplegable de delegados
   const { data: cursosRaw } = await supabase
     .from("estudiantes")
     .select("curso")

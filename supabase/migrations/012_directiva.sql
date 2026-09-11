@@ -1,10 +1,10 @@
 -- 012_directiva.sql
 -- Registro de la directiva del CdP para firmar documentos oficiales (actas,
 -- comprobantes). Cada miembro tiene un cargo (presidente, tesorero, etc) y
--- puede o no estar linkeado a un usuario del sistema (profile).
+-- puede o no estar vinculado a un usuario del sistema (profile).
 --
 -- El acta de recibo de dineros toma el nombre y RUT desde aqui,
--- reemplazando las constantes hardcoded en lib/config.ts.
+-- reemplazando las constantes fijas en lib/config.ts.
 
 -- === ENUM directiva_cargo ===
 do $$
@@ -57,7 +57,7 @@ create policy directiva_directiva_write on directiva_miembros
   for all using (is_directiva()) with check (is_directiva());
 
 -- === SEED: tesorero inicial ===
--- Patricio Caceres Barahona era el tesorero previamente hardcoded en
+-- Patricio Caceres Barahona era el tesorero previamente definido en
 -- lib/config.ts. Migracion idempotente: no reinserta si ya existe.
 insert into directiva_miembros (nombre, rut, cargo, activo, orden)
 values ('Patricio Cáceres Barahona', '13.757.066-1', 'tesorero', true, 40)

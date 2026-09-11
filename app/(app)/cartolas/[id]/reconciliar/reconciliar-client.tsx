@@ -258,7 +258,7 @@ export function ReconciliarClient({
           </h2>
           <p className="text-xs text-slate-500">
             Mismo monto pero difieren en fecha (hasta ±3 días) o hay varios
-            candidatos. Elige cuál linkear.
+            candidatos. Elige cuál vincular.
           </p>
           <div className="space-y-3">
             {resultado.sugerencias.map((s) => {
