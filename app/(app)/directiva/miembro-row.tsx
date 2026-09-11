@@ -119,7 +119,13 @@ export function MiembroRow({ m }: { m: DirectivaMiembro }) {
   return (
     <tr className={`border-b border-slate-100 ${m.activo ? "" : "opacity-60"}`}>
       <td className="py-2 pr-2 font-medium">{m.nombre}</td>
-      <td className="py-2 pr-2 font-mono text-xs">{m.rut}</td>
+      <td className="py-2 pr-2 font-mono text-xs">
+        {m.rut?.trim() ? (
+          m.rut
+        ) : (
+          <span className="text-slate-400 italic">(pendiente)</span>
+        )}
+      </td>
       <td className="py-2 pr-2">
         <span className="badge-blue">{DIRECTIVA_CARGO_LABEL[m.cargo]}</span>
       </td>

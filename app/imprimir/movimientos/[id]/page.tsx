@@ -200,8 +200,13 @@ export default async function ImprimirActaMovimientoPage({
             </span>
             , declaro haber recibido conforme, de parte de la Tesorería del{" "}
             {INSTITUCION_NOMBRE}, representada por don/doña{" "}
-            <strong>{tesoreroFirmante.nombre}</strong>, RUT{" "}
-            <strong>{tesoreroFirmante.rut}</strong>, la suma de:
+            <strong>{tesoreroFirmante.nombre}</strong>
+            {tesoreroFirmante.rut?.trim() && (
+              <>
+                , RUT <strong>{tesoreroFirmante.rut}</strong>
+              </>
+            )}
+            , la suma de:
           </p>
         </div>
 
@@ -251,7 +256,10 @@ export default async function ImprimirActaMovimientoPage({
                 {DIRECTIVA_CARGO_LABEL[f.cargo]}
               </div>
               <div className="mt-1">{f.nombre}</div>
-              <div>RUT: {f.rut}</div>
+              <div>
+                RUT:{" "}
+                {f.rut?.trim() || "__________________________"}
+              </div>
               <div>{INSTITUCION_NOMBRE}</div>
             </div>
           ))}

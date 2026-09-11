@@ -30,7 +30,8 @@ export async function crearMiembroDirectiva(input: CrearInput) {
   const nombre = input.nombre.trim();
   const rut = input.rut.trim();
   if (!nombre) throw new Error("Ingresa un nombre.");
-  if (!rut) throw new Error("Ingresa el RUT.");
+  // RUT es opcional: si queda vacío, en el acta se imprime una línea en blanco
+  // para completarlo a mano al momento de firmar.
   if (input.activo) await desactivarActivoDelCargo(input.cargo);
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.from("directiva_miembros").insert({

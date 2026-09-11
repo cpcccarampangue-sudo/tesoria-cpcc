@@ -53,7 +53,11 @@ export default async function DirectivaPage() {
                   <>
                     <div className="font-medium">{m.nombre}</div>
                     <div className="font-mono text-xs text-slate-600">
-                      {m.rut}
+                      {m.rut?.trim() || (
+                        <span className="text-slate-400 italic">
+                          RUT pendiente
+                        </span>
+                      )}
                     </div>
                   </>
                 ) : (

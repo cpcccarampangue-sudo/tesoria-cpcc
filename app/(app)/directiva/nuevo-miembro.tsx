@@ -17,7 +17,6 @@ export function NuevoMiembro() {
     e.preventDefault();
     setError(null);
     if (!nombre.trim()) return setError("Ingresa un nombre.");
-    if (!rut.trim()) return setError("Ingresa el RUT.");
     startTransition(async () => {
       try {
         await crearMiembroDirectiva({
@@ -47,7 +46,7 @@ export function NuevoMiembro() {
         />
       </div>
       <div>
-        <label className="label">RUT</label>
+        <label className="label">RUT (opcional)</label>
         <input
           className="input"
           value={rut}
