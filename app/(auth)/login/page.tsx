@@ -42,6 +42,56 @@ export default async function LoginPage({
           )}
           <LoginForm />
         </div>
+
+        <details className="mt-4 rounded-md border border-slate-200 bg-white p-3 text-sm">
+          <summary className="cursor-pointer font-medium text-slate-700">
+            ¿Primera vez? Ver ayuda para ingresar
+          </summary>
+          <div className="mt-3 space-y-3 text-slate-600">
+            <div>
+              <div className="font-semibold text-slate-800">
+                Si nunca has entrado
+              </div>
+              <ol className="list-decimal pl-5 mt-1 space-y-1">
+                <li>
+                  Pulsa la pestaña <strong>Crear cuenta</strong> arriba en el
+                  formulario.
+                </li>
+                <li>
+                  Ingresa tu correo electrónico y una contraseña de al menos 8
+                  caracteres.
+                </li>
+                <li>
+                  Vas a entrar como <strong>Apoderado</strong> por defecto. Si
+                  corresponde, la directiva puede cambiarte el rol después.
+                </li>
+              </ol>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-800">
+                Si ya tienes cuenta
+              </div>
+              <p className="mt-1">
+                Ingresa tu correo y contraseña en el formulario y pulsa{" "}
+                <strong>Ingresar</strong>.
+              </p>
+            </div>
+            <div>
+              <div className="font-semibold text-slate-800">
+                Olvidé mi contraseña
+              </div>
+              <p className="mt-1">
+                Contacta a alguien de la directiva para que restablezca tu
+                contraseña. Por seguridad no hay restablecimiento automático
+                por correo.
+              </p>
+            </div>
+            <p className="text-xs text-slate-500 pt-1 border-t border-slate-100">
+              Una vez adentro, encontrarás una guía completa en el menú{" "}
+              <strong>Ayuda</strong>.
+            </p>
+          </div>
+        </details>
       </div>
     </div>
   );

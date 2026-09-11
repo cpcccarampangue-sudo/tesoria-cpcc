@@ -32,12 +32,14 @@ export default async function AppLayout({
     { href: "/reportes", label: "Reportes" },
     { href: "/directiva", label: "Directiva" },
     { href: "/usuarios", label: "Usuarios" },
+    { href: "/ayuda", label: "Ayuda" },
   ];
 
   const navBasico = [
     { href: "/dashboard", label: "Inicio" },
     { href: "/cuotas", label: "Mis cuotas" },
     { href: "/eventos", label: "Eventos" },
+    { href: "/ayuda", label: "Ayuda" },
   ];
 
   const nav = esDirectiva ? navDirectiva : navBasico;
