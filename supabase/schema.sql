@@ -265,6 +265,18 @@ cross join cuota_periodos p
 left join cuota_pagos cp on cp.apoderado_id = a.id and cp.periodo_id = p.id
 where a.activo and p.activa;
 
+-- Avance de reconciliacion por cartola: cuantas lineas del banco ya estan
+-- vinculadas con un movimiento del sistema y cuantas siguen pendientes.
+create or replace view v_conciliacion_por_cartola as
+select
+  cl.cartola_id,
+  count(*)::int as total,
+  count(*) filter (where cl.conciliado)::int as conciliadas,
+  count(*) filter (where not cl.conciliado)::int as pendientes
+from cartola_lineas cl
+group by cl.cartola_id;
+grant select on v_conciliacion_por_cartola to authenticated;
+
 -- =============================================================================
 -- FUNCIONES DE APOYO (security definer)
 -- =============================================================================

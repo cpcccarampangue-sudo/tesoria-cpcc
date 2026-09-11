@@ -9,6 +9,8 @@ type CartolaRow = Cartola & {
   cuenta: { id: string; nombre: string; color: string | null } | null;
 };
 
+type AvanceInfo = { total: number; conciliadas: number; pendientes: number };
+
 // Convierte el nombre del archivo en una clave que ordena cronologicamente:
 //   - Banco Chile 'cartola_DDMMYYYY.xls' -> 'YYYYMMDD'
 //   - Banco Estado 'Excel_Cartola_Historica_Chequera_Electronica N AAAA.xlsx'
@@ -43,6 +45,7 @@ type SortKey =
   | "periodo"
   | "archivo"
   | "lineas"
+  | "reconciliado"
   | "saldo_inicial"
   | "saldo_final"
   | "subida";
@@ -51,9 +54,11 @@ type SortDir = "asc" | "desc";
 export function CartolasTabla({
   cartolas,
   cuentas,
+  avancesPorId,
 }: {
   cartolas: CartolaRow[];
   cuentas: { id: string; nombre: string; color: string | null }[];
+  avancesPorId: Record<string, AvanceInfo>;
 }) {
   const [filtroCuenta, setFiltroCuenta] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("periodo");
@@ -92,6 +97,15 @@ export function CartolasTabla({
           );
         case "lineas":
           return (a.filas_total - b.filas_total) * mult;
+        case "reconciliado": {
+          // Ordenamos por porcentaje de conciliadas; empate por total.
+          const av_a = avancesPorId[a.id];
+          const av_b = avancesPorId[b.id];
+          const pct_a = av_a && av_a.total > 0 ? av_a.conciliadas / av_a.total : 0;
+          const pct_b = av_b && av_b.total > 0 ? av_b.conciliadas / av_b.total : 0;
+          if (pct_a !== pct_b) return (pct_a - pct_b) * mult;
+          return ((av_a?.total ?? 0) - (av_b?.total ?? 0)) * mult;
+        }
         case "saldo_inicial":
           return (
             (Number(a.saldo_inicial ?? 0) - Number(b.saldo_inicial ?? 0)) * mult
@@ -105,7 +119,7 @@ export function CartolasTabla({
       }
     });
     return arr;
-  }, [cartolas, filtroCuenta, sortKey, sortDir]);
+  }, [cartolas, filtroCuenta, sortKey, sortDir, avancesPorId]);
 
   return (
     <div className="space-y-3">
@@ -165,6 +179,13 @@ export function CartolasTabla({
                 dir={sortDir}
                 onClick={toggleSort}
                 align="right"
+              />
+              <ThSort
+                label="Reconciliado"
+                sortKey="reconciliado"
+                current={sortKey}
+                dir={sortDir}
+                onClick={toggleSort}
               />
               <ThSort
                 label="Saldo inicial"
@@ -227,6 +248,12 @@ export function CartolasTabla({
                 <td className="table-td text-right font-semibold">
                   {c.filas_total}
                 </td>
+                <td className="table-td">
+                  <AvanceCell
+                    avance={avancesPorId[c.id]}
+                    color={c.cuenta?.color ?? "#94a3b8"}
+                  />
+                </td>
                 <td className="table-td text-right text-sm text-slate-600">
                   {c.saldo_inicial != null ? formatCLP(c.saldo_inicial) : "—"}
                 </td>
@@ -248,6 +275,41 @@ export function CartolasTabla({
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function AvanceCell({
+  avance,
+  color,
+}: {
+  avance: AvanceInfo | undefined;
+  color: string;
+}) {
+  if (!avance || avance.total === 0) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+  const pct = Math.round((avance.conciliadas / avance.total) * 100);
+  const completa = avance.pendientes === 0;
+  return (
+    <div className="min-w-[130px]">
+      <div className="text-xs font-medium text-slate-700">
+        {avance.conciliadas} / {avance.total}{" "}
+        <span
+          className={`ml-1 ${completa ? "text-green-700" : "text-slate-500"}`}
+        >
+          ({pct}%)
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${pct}%`,
+            backgroundColor: completa ? "#16a34a" : color,
+          }}
+        />
       </div>
     </div>
   );
