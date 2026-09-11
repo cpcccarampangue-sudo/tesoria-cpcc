@@ -3,10 +3,15 @@ import { notFound } from "next/navigation";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha, formatFechaHora } from "@/lib/formatters";
-import type { Movimiento, MovimientoAdjunto } from "@/lib/types";
+import type {
+  DirectivaCargo,
+  Movimiento,
+  MovimientoAdjunto,
+} from "@/lib/types";
 import { AdjuntosManager } from "@/components/adjuntos-manager";
 import { MovimientoForm } from "../movimiento-form";
 import { DeleteBtn } from "./delete-btn";
+import { ActaSelector } from "./acta-selector";
 
 export default async function MovimientoDetailPage({
   params,
@@ -26,23 +31,34 @@ export default async function MovimientoDetailPage({
   if (!data) notFound();
   const m = data as Movimiento;
 
-  const [{ data: categorias }, { data: eventos }, { data: cuentas }] =
-    await Promise.all([
-      supabase
-        .from("categorias")
-        .select("id, nombre, tipo, activa")
-        .eq("activa", true)
-        .order("nombre"),
-      supabase
-        .from("eventos")
-        .select("id, nombre")
-        .order("nombre"),
-      supabase
-        .from("cuentas")
-        .select("id, nombre, color, es_principal, activa")
-        .order("orden")
-        .order("nombre"),
-    ]);
+  const [
+    { data: categorias },
+    { data: eventos },
+    { data: cuentas },
+    { data: directivaActiva },
+  ] = await Promise.all([
+    supabase
+      .from("categorias")
+      .select("id, nombre, tipo, activa")
+      .eq("activa", true)
+      .order("nombre"),
+    supabase
+      .from("eventos")
+      .select("id, nombre")
+      .order("nombre"),
+    supabase
+      .from("cuentas")
+      .select("id, nombre, color, es_principal, activa")
+      .order("orden")
+      .order("nombre"),
+    supabase
+      .from("directiva_miembros")
+      .select("cargo")
+      .eq("activo", true),
+  ]);
+  const cargosActivos = (
+    (directivaActiva as { cargo: DirectivaCargo }[] | null) ?? []
+  ).map((d) => d.cargo);
   const cuentasVisibles = (cuentas ?? []).filter(
     (c) => c.activa || c.id === m.cuenta_id
   );
@@ -204,15 +220,10 @@ export default async function MovimientoDetailPage({
         </div>
         <div className="flex items-center gap-2">
           {m.tipo === "egreso" && (
-            <Link
-              href={`/imprimir/movimientos/${m.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary"
-              title="Genera un acta de recibo de dineros lista para imprimir y firmar"
-            >
-              🧾 Generar acta
-            </Link>
+            <ActaSelector
+              movimientoId={m.id}
+              cargosActivos={cargosActivos}
+            />
           )}
           <Link
             href={`/movimientos/nuevo?tipo=${m.tipo}${

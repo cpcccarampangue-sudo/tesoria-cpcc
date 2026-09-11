@@ -12,30 +12,75 @@ import {
   TESORERO_NOMBRE,
   TESORERO_RUT,
 } from "@/lib/config";
-import type { Categoria, Movimiento } from "@/lib/types";
+import {
+  DIRECTIVA_CARGO_LABEL,
+  type Categoria,
+  type DirectivaCargo,
+  type DirectivaMiembro,
+  type Movimiento,
+} from "@/lib/types";
 import { PrintToolbar } from "./print-toolbar";
 
 export const dynamic = "force-dynamic";
 
+// Cargos permitidos como firmantes del acta (subset de DirectivaCargo).
+const CARGOS_VALIDOS: DirectivaCargo[] = [
+  "presidente",
+  "vicepresidente",
+  "tesorero",
+  "protesorero",
+  "secretario",
+  "director",
+];
+
+// Firmante = miembro real de la directiva, o fallback hardcoded (solo tesorero).
+type Firmante = { cargo: DirectivaCargo; nombre: string; rut: string };
+
+function parseFirmantes(raw: string | string[] | undefined): DirectivaCargo[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw ?? "tesorero";
+  const cargos = value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is DirectivaCargo =>
+      CARGOS_VALIDOS.includes(s as DirectivaCargo)
+    );
+  // Deduplicar preservando orden. Si vino vacio, default "tesorero".
+  const seen = new Set<DirectivaCargo>();
+  const out: DirectivaCargo[] = [];
+  for (const c of cargos) {
+    if (!seen.has(c)) {
+      seen.add(c);
+      out.push(c);
+    }
+  }
+  return out.length > 0 ? out : ["tesorero"];
+}
+
 export default async function ImprimirActaMovimientoPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ firmantes?: string | string[] }>;
 }) {
-  const { id } = await params;
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
 
-  const { data } = await supabase
-    .from("movimientos")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (!data) notFound();
-  const m = data as Movimiento;
+  const cargosPedidos = parseFirmantes(sp.firmantes);
 
-  // El acta de recibo tiene sentido solo para egresos NO-transferencia.
-  // Si alguien llega aca con un ingreso o una transferencia, mostramos aviso.
+  const [{ data: movData }, { data: dirData }] = await Promise.all([
+    supabase.from("movimientos").select("*").eq("id", id).maybeSingle(),
+    supabase
+      .from("directiva_miembros")
+      .select("*")
+      .eq("activo", true),
+  ]);
+
+  if (!movData) notFound();
+  const m = movData as Movimiento;
+  const directivaActiva = (dirData as DirectivaMiembro[] | null) ?? [];
+
   const permitida = m.tipo === "egreso" && !m.es_transferencia;
 
   let categoria: Categoria | null = null;
@@ -48,14 +93,43 @@ export default async function ImprimirActaMovimientoPage({
     categoria = (cat as Categoria | null) ?? null;
   }
 
+  // Resolver firmantes: buscar miembro activo por cargo. Si no hay y el cargo
+  // es "tesorero", caemos al hardcoded para no romper la funcionalidad.
+  const firmantes: Firmante[] = [];
+  for (const cargo of cargosPedidos) {
+    const miembro = directivaActiva.find((d) => d.cargo === cargo);
+    if (miembro) {
+      firmantes.push({ cargo, nombre: miembro.nombre, rut: miembro.rut });
+    } else if (cargo === "tesorero") {
+      firmantes.push({
+        cargo: "tesorero",
+        nombre: TESORERO_NOMBRE,
+        rut: TESORERO_RUT,
+      });
+    }
+    // Si el cargo pedido no tiene miembro activo (y no es tesorero), simplemente
+    // no aparece. El aviso al usuario ocurre en el detalle del movimiento donde
+    // se elige, asi que aca no interrumpimos la impresion.
+  }
+
   const fechaMovLarga = formatFechaLarga(m.fecha);
   const hoy = formatFechaLarga(new Date());
   const montoPalabras = montoCLPEnPalabras(m.monto);
-  const concepto = m.descripcion?.trim() || categoria?.nombre || "Egreso registrado en tesorería";
+  const concepto =
+    m.descripcion?.trim() ||
+    categoria?.nombre ||
+    "Egreso registrado en tesorería";
+
+  // Para el prefacio, mencionamos al tesorero (el que entrega la plata).
+  const tesoreroFirmante =
+    firmantes.find((f) => f.cargo === "tesorero") ?? {
+      cargo: "tesorero" as DirectivaCargo,
+      nombre: TESORERO_NOMBRE,
+      rut: TESORERO_RUT,
+    };
 
   return (
     <>
-      {/* Estilos de impresion: papel Carta, sin cabeceras del navegador */}
       <style>{`
         @media print {
           @page { size: Letter; margin: 2.2cm 2.5cm; }
@@ -70,9 +144,13 @@ export default async function ImprimirActaMovimientoPage({
       <div className="mx-auto max-w-3xl px-6 py-6 print:px-0 print:py-0">
         {!permitida && (
           <div className="no-print mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            El acta de recibo está pensada para <strong>egresos en efectivo</strong>. Este
-            movimiento es {m.es_transferencia ? "una transferencia interna" : `un ${m.tipo}`}
-            . Puedes imprimirlo igual, pero revisa que el documento tenga sentido para tu caso.
+            El acta de recibo está pensada para{" "}
+            <strong>egresos en efectivo</strong>. Este movimiento es{" "}
+            {m.es_transferencia
+              ? "una transferencia interna"
+              : `un ${m.tipo}`}
+            . Puedes imprimirlo igual, pero revisa que el documento tenga
+            sentido para tu caso.
           </div>
         )}
 
@@ -96,7 +174,8 @@ export default async function ImprimirActaMovimientoPage({
 
         <div className="flex items-center justify-between text-xs text-slate-600">
           <span>
-            Folio N°: <span className="font-mono">{id.slice(0, 8).toUpperCase()}</span>
+            Folio N°:{" "}
+            <span className="font-mono">{id.slice(0, 8).toUpperCase()}</span>
           </span>
           <span>Emitido: {hoy}</span>
         </div>
@@ -120,13 +199,12 @@ export default async function ImprimirActaMovimientoPage({
               &nbsp;
             </span>
             , declaro haber recibido conforme, de parte de la Tesorería del{" "}
-            {INSTITUCION_NOMBRE}, representada por don{" "}
-            <strong>{TESORERO_NOMBRE}</strong>, RUT <strong>{TESORERO_RUT}</strong>, la
-            suma de:
+            {INSTITUCION_NOMBRE}, representada por don/doña{" "}
+            <strong>{tesoreroFirmante.nombre}</strong>, RUT{" "}
+            <strong>{tesoreroFirmante.rut}</strong>, la suma de:
           </p>
         </div>
 
-        {/* Cuadro de datos */}
         <div className="mt-4 border border-slate-800 p-4 text-[13px]">
           <div className="grid grid-cols-[160px_1fr] gap-y-2">
             <div className="font-bold">Monto en números:</div>
@@ -144,32 +222,45 @@ export default async function ImprimirActaMovimientoPage({
         </div>
 
         <p className="mt-4 text-justify text-[13px] leading-relaxed">
-          Con la firma del presente documento se deja constancia de la entrega y
-          recepción íntegra del monto señalado, no quedando pendiente pago alguno por
-          este concepto entre las partes.
+          Con la firma del presente documento se deja constancia de la entrega
+          y recepción íntegra del monto señalado, no quedando pendiente pago
+          alguno por este concepto entre las partes.
         </p>
 
-        {/* Firmas */}
-        <div className="mt-16 grid grid-cols-2 gap-10 text-[12px]">
-          <div className="text-center">
+        {/* Firma del que recibe */}
+        <div className="mt-14 flex justify-center">
+          <div className="w-72 text-center text-[12px]">
             <div className="mb-1 border-t border-slate-800" />
             <div className="font-bold uppercase">Recibe conforme</div>
             <div className="mt-1">Nombre: ______________________________</div>
             <div>RUT: __________________________________</div>
             <div>Firma</div>
           </div>
-          <div className="text-center">
-            <div className="mb-1 border-t border-slate-800" />
-            <div className="font-bold uppercase">Entrega</div>
-            <div className="mt-1">{TESORERO_NOMBRE}</div>
-            <div>RUT: {TESORERO_RUT}</div>
-            <div>Tesorero — {INSTITUCION_NOMBRE}</div>
-          </div>
+        </div>
+
+        {/* Firmas del CdP (1 o mas) */}
+        <div
+          className={`mt-14 grid gap-8 text-[12px] ${
+            firmantes.length >= 2 ? "grid-cols-2" : "grid-cols-1 justify-items-center"
+          }`}
+        >
+          {firmantes.map((f) => (
+            <div key={f.cargo} className="text-center">
+              <div className="mb-1 border-t border-slate-800" />
+              <div className="font-bold uppercase">
+                {DIRECTIVA_CARGO_LABEL[f.cargo]}
+              </div>
+              <div className="mt-1">{f.nombre}</div>
+              <div>RUT: {f.rut}</div>
+              <div>{INSTITUCION_NOMBRE}</div>
+            </div>
+          ))}
         </div>
 
         <footer className="mt-10 border-t border-slate-300 pt-2 text-center text-[10px] text-slate-500">
-          Documento emitido por la Tesorería del {INSTITUCION_NOMBRE} · Comprobante
-          interno de egreso · Folio {id.slice(0, 8).toUpperCase()}
+          Documento emitido por la Tesorería del {INSTITUCION_NOMBRE} ·
+          Comprobante interno de egreso · Folio{" "}
+          {id.slice(0, 8).toUpperCase()}
         </footer>
       </div>
     </>

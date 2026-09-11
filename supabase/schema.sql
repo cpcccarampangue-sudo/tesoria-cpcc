@@ -26,6 +26,11 @@ do $$ begin
   if not exists (select 1 from pg_type where typname = 'contacto_relacion') then
     create type contacto_relacion as enum ('padre', 'madre', 'apoderado_cuenta', 'apoderado_academico', 'otro');
   end if;
+  if not exists (select 1 from pg_type where typname = 'directiva_cargo') then
+    create type directiva_cargo as enum (
+      'presidente', 'vicepresidente', 'tesorero', 'protesorero', 'secretario', 'director'
+    );
+  end if;
 end $$;
 
 -- === APODERADOS (la "familia" — unidad de cobro de cuota) ===
@@ -171,6 +176,27 @@ create index if not exists idx_movimientos_cuenta on movimientos (cuenta_id);
 create index if not exists idx_movimientos_transferencia_par
   on movimientos (transferencia_par_id)
   where transferencia_par_id is not null;
+
+-- === DIRECTIVA_MIEMBROS (para firmar documentos oficiales) ===
+-- Cargos vigentes de la directiva (tesorero, presidente, etc). El acta de
+-- recibo de dineros toma nombre y RUT desde aqui.
+create table if not exists directiva_miembros (
+  id uuid primary key default gen_random_uuid(),
+  nombre text not null,
+  rut text not null,
+  cargo directiva_cargo not null,
+  activo boolean not null default true,
+  orden int not null default 0,
+  profile_id uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_directiva_cargo_activo
+  on directiva_miembros (cargo, activo);
+create index if not exists idx_directiva_orden
+  on directiva_miembros (orden, nombre);
+-- Solo un miembro activo por cargo.
+create unique index if not exists idx_directiva_cargo_activo_unico
+  on directiva_miembros (cargo) where activo = true;
 
 -- =============================================================================
 -- VISTAS de agregación (usadas por la UI para KPIs)
@@ -464,6 +490,7 @@ alter table movimiento_adjuntos enable row level security;
 alter table cartolas           enable row level security;
 alter table cartola_lineas     enable row level security;
 alter table conciliaciones     enable row level security;
+alter table directiva_miembros enable row level security;
 
 -- Drop policies existentes para poder re-ejecutar el script.
 do $$
@@ -475,7 +502,7 @@ begin
       and tablename in ('profiles','apoderados','estudiantes','categorias','cuentas',
                         'eventos','cuota_periodos','cuota_pagos','movimientos',
                         'movimiento_adjuntos','cartolas','cartola_lineas',
-                        'conciliaciones')
+                        'conciliaciones','directiva_miembros')
   loop
     execute format('drop policy if exists %I on %I.%I', r.policyname, r.schemaname, r.tablename);
   end loop;
@@ -549,6 +576,13 @@ create policy cartola_lineas_directiva_all on cartola_lineas
 create policy conciliaciones_directiva_all on conciliaciones
   for all using (is_directiva()) with check (is_directiva());
 
+-- === directiva_miembros ===
+-- Autenticados leen (para mostrar firmantes en actas), directiva escribe.
+create policy directiva_all_authenticated_select on directiva_miembros
+  for select using (auth.uid() is not null);
+create policy directiva_directiva_write on directiva_miembros
+  for all using (is_directiva()) with check (is_directiva());
+
 -- =============================================================================
 -- STORAGE: bucket 'boletas' (crear en Storage UI si no existe, o vía SQL)
 -- =============================================================================
@@ -608,6 +642,11 @@ insert into cuentas (nombre, tipo, banco, titular, orden, es_principal, color) v
   ('Banco Chile — Cuenta FAN', 'banco',    'banco_chile',  'Tesorero (a nombre del CdP)', 2, false, '#1e40af'),
   ('Caja Chica',               'efectivo', null,           null,                          3, false, '#65a30d')
 on conflict (nombre) do nothing;
+
+-- === SEED: tesorero inicial de la directiva (para actas) ===
+insert into directiva_miembros (nombre, rut, cargo, activo, orden) values
+  ('Patricio Cáceres Barahona', '13.757.066-1', 'tesorero', true, 40)
+on conflict do nothing;
 
 -- =============================================================================
 -- FIN

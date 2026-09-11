@@ -162,6 +162,45 @@ export type MovimientoAdjunto = {
   subido_en: string;
 };
 
+// Directiva del CdP: cargos vigentes que firman documentos oficiales.
+export type DirectivaCargo =
+  | "presidente"
+  | "vicepresidente"
+  | "tesorero"
+  | "protesorero"
+  | "secretario"
+  | "director";
+
+export const DIRECTIVA_CARGO_LABEL: Record<DirectivaCargo, string> = {
+  presidente: "Presidente/a",
+  vicepresidente: "Vicepresidente/a",
+  tesorero: "Tesorero/a",
+  protesorero: "Protesorero/a",
+  secretario: "Secretario/a",
+  director: "Director/a",
+};
+
+// Orden sugerido para ordenar cargos en la UI (presidente arriba).
+export const DIRECTIVA_CARGO_ORDEN: DirectivaCargo[] = [
+  "presidente",
+  "vicepresidente",
+  "secretario",
+  "tesorero",
+  "protesorero",
+  "director",
+];
+
+export type DirectivaMiembro = {
+  id: string;
+  nombre: string;
+  rut: string;
+  cargo: DirectivaCargo;
+  activo: boolean;
+  orden: number;
+  profile_id: string | null;
+  created_at: string;
+};
+
 export type Cartola = {
   id: string;
   cuenta_id: string;
