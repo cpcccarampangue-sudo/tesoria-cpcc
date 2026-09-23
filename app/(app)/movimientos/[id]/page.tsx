@@ -92,6 +92,14 @@ export default async function MovimientoDetailPage({
     const cuentaEste = cuentasVisibles.find((c) => c.id === m.cuenta_id);
     return (
       <div className="max-w-2xl space-y-4">
+        <div>
+          <Link
+            href="/movimientos"
+            className="text-sm text-slate-600 hover:underline"
+          >
+            ← Volver a movimientos
+          </Link>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold flex items-center gap-2">
@@ -202,6 +210,14 @@ export default async function MovimientoDetailPage({
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div>
+        <Link
+          href="/movimientos"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a movimientos
+        </Link>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">

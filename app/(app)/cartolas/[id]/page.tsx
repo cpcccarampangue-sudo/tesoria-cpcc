@@ -123,7 +123,7 @@ export default async function CartolaDetailPage({
           href="/cartolas"
           className="text-sm text-slate-600 hover:underline"
         >
-          ← Cartolas
+          ← Volver a cartolas
         </Link>
       </div>
 

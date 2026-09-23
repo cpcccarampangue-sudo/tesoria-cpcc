@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -34,6 +35,14 @@ export default async function EditarApoderadoPage({
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div>
+        <Link
+          href="/apoderados"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a familias
+        </Link>
+      </div>
       <h1 className="text-2xl font-semibold">Editar familia</h1>
       <div className="card">
         <EditarApoderadoForm

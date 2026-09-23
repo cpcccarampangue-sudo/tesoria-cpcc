@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { ImportForm } from "./import-form";
 
@@ -12,6 +13,14 @@ export default async function ImportarApoderadosPage() {
   await requireDirectiva();
   return (
     <div className="max-w-3xl space-y-4">
+      <div>
+        <Link
+          href="/apoderados"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a familias
+        </Link>
+      </div>
       <div>
         <h1 className="text-2xl font-semibold">Importar familias desde CSV</h1>
         <p className="text-sm text-slate-600 mt-1">

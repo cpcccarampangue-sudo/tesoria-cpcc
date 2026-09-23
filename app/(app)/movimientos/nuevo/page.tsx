@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { MovimientoForm } from "../movimiento-form";
@@ -40,6 +41,14 @@ export default async function NuevoMovimientoPage({
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div>
+        <Link
+          href="/movimientos"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a movimientos
+        </Link>
+      </div>
       <h1 className="text-2xl font-semibold">Nuevo movimiento</h1>
       <div className="card">
         <MovimientoForm

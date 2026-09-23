@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { SincronizarForm } from "./sincronizar-form";
 
@@ -7,6 +8,14 @@ export default async function SincronizarPage() {
   await requireDirectiva();
   return (
     <div className="max-w-3xl space-y-4">
+      <div>
+        <Link
+          href="/apoderados"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a familias
+        </Link>
+      </div>
       <div>
         <h1 className="text-2xl font-semibold">
           Sincronizar desde Google Sheets

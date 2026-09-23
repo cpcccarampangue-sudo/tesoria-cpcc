@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { BANCOS_SOPORTADOS } from "@/lib/cartolas";
@@ -22,6 +23,14 @@ export default async function NuevaCartolaPage() {
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div>
+        <Link
+          href="/cartolas"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a cartolas
+        </Link>
+      </div>
       <h1 className="text-2xl font-semibold">Subir cartola bancaria</h1>
       <p className="text-sm text-slate-600">
         Baja la cartola en Excel desde tu banco (Banco Estado como

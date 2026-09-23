@@ -41,6 +41,14 @@ export default async function EventoDetailPage({
 
   return (
     <div className="space-y-4">
+      <div>
+        <Link
+          href="/eventos"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a eventos
+        </Link>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">{balance.nombre}</h1>

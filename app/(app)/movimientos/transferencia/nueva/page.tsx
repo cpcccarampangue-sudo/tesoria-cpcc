@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { TransferenciaForm } from "./transferencia-form";
@@ -33,6 +34,14 @@ export default async function NuevaTransferenciaPage({
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div>
+        <Link
+          href="/movimientos"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a movimientos
+        </Link>
+      </div>
       <h1 className="text-2xl font-semibold">Nueva transferencia entre cuentas</h1>
       <p className="text-sm text-slate-600">
         Mueve plata de una cuenta del CdP a otra. No afecta el balance total —

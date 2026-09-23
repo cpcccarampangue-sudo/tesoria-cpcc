@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { ImportExcelForm } from "./import-excel-form";
 
@@ -9,6 +10,14 @@ export default async function ImportarExcelPage() {
   await requireDirectiva();
   return (
     <div className="max-w-3xl space-y-4">
+      <div>
+        <Link
+          href="/apoderados"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a familias
+        </Link>
+      </div>
       <div>
         <h1 className="text-2xl font-semibold">
           Importar Excel de familias del colegio

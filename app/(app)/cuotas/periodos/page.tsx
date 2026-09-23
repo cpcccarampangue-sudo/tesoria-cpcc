@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha } from "@/lib/formatters";
@@ -17,6 +18,14 @@ export default async function PeriodosPage() {
 
   return (
     <div className="space-y-4">
+      <div>
+        <Link
+          href="/cuotas"
+          className="text-sm text-slate-600 hover:underline"
+        >
+          ← Volver a cuotas
+        </Link>
+      </div>
       <div>
         <h1 className="text-2xl font-semibold">Períodos de cuota</h1>
         <p className="text-sm text-slate-600">
