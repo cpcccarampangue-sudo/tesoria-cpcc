@@ -2,21 +2,22 @@ import Image from "next/image";
 
 export function AppFooter() {
   return (
-    <footer className="border-t border-slate-200 bg-white py-4 px-4 text-center text-xs text-slate-500">
-      <div>
-        Tesorería CPCC — Colegio Carampangue · {new Date().getFullYear()}
-      </div>
-      <div className="mt-2 flex items-center justify-center gap-2 text-slate-400">
-        <span>Proyecto desarrollado por</span>
-        <Image
-          src="/actyon.png"
-          alt="Actyon Ingeniería Ltda."
-          width={100}
-          height={30}
-          className="h-5 w-auto object-contain"
-          priority={false}
-        />
-        <span>Ltda.</span>
+    <footer className="border-t border-slate-200 bg-white py-3 px-4 text-xs text-slate-500">
+      <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+        <div>
+          © {new Date().getFullYear()} Tesorería CPCC — Colegio Carampangue
+        </div>
+        <div className="flex items-center gap-2">
+          <span>Desarrollado por</span>
+          <Image
+            src="/actyon.png"
+            alt="Actyon Ingeniería Ltda."
+            width={120}
+            height={36}
+            className="h-6 w-auto object-contain"
+            priority={false}
+          />
+        </div>
       </div>
     </footer>
   );
