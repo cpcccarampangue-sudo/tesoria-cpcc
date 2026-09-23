@@ -12,6 +12,7 @@ import type {
   Movimiento,
   MovimientoAdjunto,
 } from "@/lib/types";
+import { PdfEmbed } from "@/components/pdf-embed";
 import { PrintToolbar } from "./print-toolbar";
 
 export const dynamic = "force-dynamic";
@@ -401,22 +402,7 @@ export default async function ImprimirEventoPage({
                       />
                     </div>
                   ) : b.esPdf ? (
-                    <div className="rounded border border-dashed border-slate-300 p-4 text-sm text-slate-600">
-                      Este respaldo es un archivo PDF y no se puede incrustar en
-                      la impresión.{" "}
-                      <a
-                        href={b.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-brand-700 underline no-print"
-                      >
-                        Abrir PDF
-                      </a>
-                      <div className="mt-1 text-xs text-slate-500">
-                        Sugerencia: abre el PDF e imprímelo por separado si
-                        necesitas anexarlo al documento en papel.
-                      </div>
-                    </div>
+                    <PdfEmbed url={b.url} />
                   ) : (
                     <div className="rounded border border-dashed border-slate-300 p-4 text-sm text-slate-600">
                       Este respaldo no es una imagen ({b.nombre}).{" "}
