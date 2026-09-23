@@ -155,20 +155,22 @@ export default async function ImprimirActaMovimientoPage({
         )}
 
         {/* Cabecera institucional */}
-        <header className="mb-6 flex items-center gap-5 border-b-2 border-slate-800 pb-3">
+        <header className="mb-4 flex items-center justify-between gap-6 border-b border-slate-300 pb-3">
           <Image
             src="/logo.png"
             alt="Logo del colegio"
-            width={140}
-            height={140}
-            className="h-28 w-28 object-contain"
+            width={180}
+            height={180}
+            className="h-32 w-32 object-contain"
             priority
           />
-          <div className="text-left">
-            <div className="text-base font-bold uppercase tracking-wide">
+          <div className="text-right">
+            <div className="text-sm text-slate-600">
+              Acta de recibo — Tesorería CPCC
+            </div>
+            <div className="text-lg font-bold uppercase tracking-wide">
               {INSTITUCION_NOMBRE}
             </div>
-            <div className="text-xs text-slate-600">Tesorería</div>
           </div>
         </header>
 
