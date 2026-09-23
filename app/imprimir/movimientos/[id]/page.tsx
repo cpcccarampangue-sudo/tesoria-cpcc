@@ -234,38 +234,60 @@ export default async function ImprimirActaMovimientoPage({
           alguno por este concepto entre las partes.
         </p>
 
-        {/* Firma del que recibe */}
-        <div className="mt-14 flex justify-center">
-          <div className="w-72 text-center text-[12px]">
-            <div className="mb-1 border-t border-slate-800" />
-            <div className="font-bold uppercase">Recibe conforme</div>
-            <div className="mt-1">Nombre: ______________________________</div>
-            <div>RUT: __________________________________</div>
-            <div>Firma</div>
-          </div>
-        </div>
-
-        {/* Firmas del CdP (1 o mas) */}
-        <div
-          className={`mt-14 grid gap-8 text-[12px] ${
-            firmantes.length >= 2 ? "grid-cols-2" : "grid-cols-1 justify-items-center"
-          }`}
-        >
-          {firmantes.map((f) => (
-            <div key={f.cargo} className="text-center">
+        {firmantes.length === 1 ? (
+          // Caso simple: solo firma el que recibe y el tesorero, uno al lado
+          // del otro para aprovechar el espacio.
+          <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
+            <div className="text-center">
+              <div className="mb-1 border-t border-slate-800" />
+              <div className="font-bold uppercase">Recibe conforme</div>
+              <div className="mt-1">Nombre: ______________________________</div>
+              <div>RUT: __________________________________</div>
+              <div>Firma</div>
+            </div>
+            <div className="text-center">
               <div className="mb-1 border-t border-slate-800" />
               <div className="font-bold uppercase">
-                {DIRECTIVA_CARGO_LABEL[f.cargo]}
+                {DIRECTIVA_CARGO_LABEL[firmantes[0].cargo]}
               </div>
-              <div className="mt-1">{f.nombre}</div>
+              <div className="mt-1">{firmantes[0].nombre}</div>
               <div>
-                RUT:{" "}
-                {f.rut?.trim() || "__________________________"}
+                RUT: {firmantes[0].rut?.trim() || "__________________________"}
               </div>
               <div>{INSTITUCION_NOMBRE}</div>
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* Firma del que recibe */}
+            <div className="mt-14 flex justify-center">
+              <div className="w-72 text-center text-[12px]">
+                <div className="mb-1 border-t border-slate-800" />
+                <div className="font-bold uppercase">Recibe conforme</div>
+                <div className="mt-1">Nombre: ______________________________</div>
+                <div>RUT: __________________________________</div>
+                <div>Firma</div>
+              </div>
+            </div>
+
+            {/* Firmas del CdP (2 o mas) */}
+            <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
+              {firmantes.map((f) => (
+                <div key={f.cargo} className="text-center">
+                  <div className="mb-1 border-t border-slate-800" />
+                  <div className="font-bold uppercase">
+                    {DIRECTIVA_CARGO_LABEL[f.cargo]}
+                  </div>
+                  <div className="mt-1">{f.nombre}</div>
+                  <div>
+                    RUT: {f.rut?.trim() || "__________________________"}
+                  </div>
+                  <div>{INSTITUCION_NOMBRE}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         <footer className="mt-10 border-t border-slate-300 pt-2 text-center text-[10px] text-slate-500">
           Documento emitido por la Tesorería del {INSTITUCION_NOMBRE} ·
