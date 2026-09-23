@@ -27,6 +27,7 @@ const TIPOS: AdjuntoTipo[] = [
   "cotizacion",
   "contrato",
   "foto",
+  "acta_firmada",
   "otro",
 ];
 

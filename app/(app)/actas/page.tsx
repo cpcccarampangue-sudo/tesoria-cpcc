@@ -6,9 +6,28 @@ import { ActaForm } from "./acta-form";
 export const metadata = { title: "Actas — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
-export default async function ActasPage() {
+function firstParam(raw: string | string[] | undefined): string {
+  if (Array.isArray(raw)) return raw[0] ?? "";
+  return raw ?? "";
+}
+
+export default async function ActasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    direccion?: string;
+    monto?: string;
+    concepto?: string;
+    fecha?: string;
+    persona_nombre?: string;
+    persona_rut?: string;
+    ciudad?: string;
+    medio?: string;
+  }>;
+}) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
+  const sp = await searchParams;
 
   const { data: directivaActiva } = await supabase
     .from("directiva_miembros")
@@ -17,6 +36,15 @@ export default async function ActasPage() {
   const cargosActivos = (
     (directivaActiva as { cargo: DirectivaCargo }[] | null) ?? []
   ).map((d) => d.cargo);
+
+  const direccionInicial =
+    firstParam(sp.direccion) === "ingreso" ? "ingreso" : "egreso";
+  const medioParam = firstParam(sp.medio);
+  const medioInicial =
+    medioParam === "transferencia" || medioParam === "cheque"
+      ? medioParam
+      : "efectivo";
+  const prellenado = !!sp.direccion || !!sp.monto || !!sp.concepto;
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -29,8 +57,26 @@ export default async function ActasPage() {
         </p>
       </div>
 
+      {prellenado && (
+        <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+          El formulario viene <strong>prellenado</strong> con los datos del
+          movimiento. Ajusta lo que necesites (persona, RUT, ciudad, medio,
+          firmantes) y presiona <strong>Generar acta</strong>.
+        </div>
+      )}
+
       <div className="card">
-        <ActaForm cargosActivos={cargosActivos} />
+        <ActaForm
+          cargosActivos={cargosActivos}
+          direccionInicial={direccionInicial}
+          montoInicial={firstParam(sp.monto)}
+          conceptoInicial={firstParam(sp.concepto)}
+          fechaInicial={firstParam(sp.fecha)}
+          personaNombreInicial={firstParam(sp.persona_nombre)}
+          personaRutInicial={firstParam(sp.persona_rut)}
+          ciudadInicial={firstParam(sp.ciudad)}
+          medioInicial={medioInicial}
+        />
       </div>
 
       <div className="card bg-slate-50 text-sm text-slate-600 space-y-2">

@@ -24,17 +24,33 @@ type Medio = "efectivo" | "transferencia" | "cheque";
 
 export function ActaForm({
   cargosActivos,
+  direccionInicial = "egreso",
+  montoInicial = "",
+  conceptoInicial = "",
+  fechaInicial = "",
+  personaNombreInicial = "",
+  personaRutInicial = "",
+  ciudadInicial = "",
+  medioInicial = "efectivo",
 }: {
   cargosActivos: DirectivaCargo[];
+  direccionInicial?: Direccion;
+  montoInicial?: string;
+  conceptoInicial?: string;
+  fechaInicial?: string;
+  personaNombreInicial?: string;
+  personaRutInicial?: string;
+  ciudadInicial?: string;
+  medioInicial?: Medio;
 }) {
-  const [direccion, setDireccion] = useState<Direccion>("egreso");
-  const [monto, setMonto] = useState("");
-  const [concepto, setConcepto] = useState("");
-  const [fecha, setFecha] = useState(todayISO());
-  const [personaNombre, setPersonaNombre] = useState("");
-  const [personaRut, setPersonaRut] = useState("");
-  const [ciudad, setCiudad] = useState("");
-  const [medio, setMedio] = useState<Medio>("efectivo");
+  const [direccion, setDireccion] = useState<Direccion>(direccionInicial);
+  const [monto, setMonto] = useState(montoInicial);
+  const [concepto, setConcepto] = useState(conceptoInicial);
+  const [fecha, setFecha] = useState(fechaInicial || todayISO());
+  const [personaNombre, setPersonaNombre] = useState(personaNombreInicial);
+  const [personaRut, setPersonaRut] = useState(personaRutInicial);
+  const [ciudad, setCiudad] = useState(ciudadInicial);
+  const [medio, setMedio] = useState<Medio>(medioInicial);
   const [firmantes, setFirmantes] = useState<Set<DirectivaCargo>>(
     new Set(["tesorero"])
   );

@@ -409,7 +409,7 @@ create table if not exists movimiento_adjuntos (
   storage_path text not null,
   nombre_original text,
   tipo text not null default 'otro'
-    check (tipo in ('boleta', 'comprobante', 'cotizacion', 'contrato', 'foto', 'otro')),
+    check (tipo in ('boleta', 'comprobante', 'cotizacion', 'contrato', 'foto', 'acta_firmada', 'otro')),
   descripcion text,
   subido_por uuid references profiles(id) on delete set null,
   subido_en timestamptz not null default now()

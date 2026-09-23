@@ -5,14 +5,23 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha, formatFechaHora } from "@/lib/formatters";
 import { resolverVolver } from "@/lib/volver";
 import type {
-  DirectivaCargo,
   Movimiento,
   MovimientoAdjunto,
 } from "@/lib/types";
 import { AdjuntosManager } from "@/components/adjuntos-manager";
 import { MovimientoForm } from "../movimiento-form";
 import { DeleteBtn } from "./delete-btn";
-import { ActaSelector } from "./acta-selector";
+
+// Construye el link a /actas prellenando los datos del movimiento.
+// La usuaria ajusta persona, RUT, ciudad, medio y firmantes en el form.
+function actaHref(m: Movimiento): string {
+  const params = new URLSearchParams();
+  params.set("direccion", m.tipo);
+  params.set("monto", String(m.monto));
+  params.set("fecha", m.fecha);
+  if (m.descripcion?.trim()) params.set("concepto", m.descripcion.trim());
+  return `/actas?${params.toString()}`;
+}
 
 export default async function MovimientoDetailPage({
   params,
@@ -43,7 +52,6 @@ export default async function MovimientoDetailPage({
     { data: categorias },
     { data: eventos },
     { data: cuentas },
-    { data: directivaActiva },
   ] = await Promise.all([
     supabase
       .from("categorias")
@@ -59,14 +67,7 @@ export default async function MovimientoDetailPage({
       .select("id, nombre, color, es_principal, activa")
       .order("orden")
       .order("nombre"),
-    supabase
-      .from("directiva_miembros")
-      .select("cargo")
-      .eq("activo", true),
   ]);
-  const cargosActivos = (
-    (directivaActiva as { cargo: DirectivaCargo }[] | null) ?? []
-  ).map((d) => d.cargo);
   const cuentasVisibles = (cuentas ?? []).filter(
     (c) => c.activa || c.id === m.cuenta_id
   );
@@ -118,6 +119,13 @@ export default async function MovimientoDetailPage({
               Creado {formatFechaHora(m.created_at)}
             </p>
           </div>
+          <Link
+            href={actaHref(m)}
+            className="btn-secondary"
+            title="Generar un acta de recibo con los datos de esta línea, para que la contraparte firme"
+          >
+            🧾 Generar acta
+          </Link>
         </div>
 
         <div className="card space-y-3">
@@ -243,12 +251,13 @@ export default async function MovimientoDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {m.tipo === "egreso" && (
-            <ActaSelector
-              movimientoId={m.id}
-              cargosActivos={cargosActivos}
-            />
-          )}
+          <Link
+            href={actaHref(m)}
+            className="btn-secondary"
+            title="Generar un acta de recibo con los datos de este movimiento, para que la contraparte firme"
+          >
+            🧾 Generar acta
+          </Link>
           <Link
             href={`/movimientos/nuevo?tipo=${m.tipo}${
               m.evento_id ? `&evento_id=${m.evento_id}` : ""

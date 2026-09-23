@@ -140,6 +140,7 @@ export type AdjuntoTipo =
   | "cotizacion"
   | "contrato"
   | "foto"
+  | "acta_firmada"
   | "otro";
 
 export const ADJUNTO_TIPO_LABEL: Record<AdjuntoTipo, string> = {
@@ -148,6 +149,7 @@ export const ADJUNTO_TIPO_LABEL: Record<AdjuntoTipo, string> = {
   cotizacion: "Cotización",
   contrato: "Contrato",
   foto: "Foto",
+  acta_firmada: "Acta firmada",
   otro: "Otro",
 };
 
