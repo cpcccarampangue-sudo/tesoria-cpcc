@@ -1,4 +1,5 @@
 import { LoginForm } from "./login-form";
+import { AppFooter } from "@/components/app-footer";
 
 export const metadata = { title: "Ingresar — Tesorería CPCC" };
 
@@ -9,8 +10,9 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex flex-col bg-slate-50">
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md">
         <div className="text-center mb-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -92,7 +94,9 @@ export default async function LoginPage({
             </p>
           </div>
         </details>
+        </div>
       </div>
+      <AppFooter />
     </div>
   );
 }

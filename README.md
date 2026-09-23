@@ -113,7 +113,7 @@ Inicializa el repositorio y súbelo (el CLI de GitHub simplifica esto):
 ```powershell
 git init
 git add .
-git commit -m "Inicial: Tesoria CPCC"
+git commit -m "Inicial: Tesorería CPCC"
 
 # Solo la primera vez:
 gh auth login

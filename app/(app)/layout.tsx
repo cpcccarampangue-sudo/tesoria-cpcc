@@ -3,6 +3,7 @@ import Image from "next/image";
 import { redirect } from "next/navigation";
 import { requireProfile, roleLabel } from "@/lib/auth";
 import { NavLink } from "@/components/nav-link";
+import { AppFooter } from "@/components/app-footer";
 
 export default async function AppLayout({
   children,
@@ -94,9 +95,7 @@ export default async function AppLayout({
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-6">
         {children}
       </main>
-      <footer className="border-t border-slate-200 bg-white py-3 text-center text-xs text-slate-500">
-        Tesorería CPCC — Colegio Carampangue · {new Date().getFullYear()}
-      </footer>
+      <AppFooter />
     </div>
   );
 }
