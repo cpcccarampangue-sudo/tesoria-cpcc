@@ -313,7 +313,7 @@ export function ReconciliarClient({
                           </div>
                           <div className="flex gap-2">
                             <Link
-                              href={`/movimientos/${m.id}`}
+                              href={`/movimientos/${m.id}?volver=/cartolas/${cartolaId}/reconciliar`}
                               className="text-xs text-slate-600 hover:underline"
                             >
                               Ver
@@ -358,6 +358,7 @@ export function ReconciliarClient({
                 movsLibres={movsLibres}
                 onVincular={(movId) => vincularSugerencia(l.id, movId)}
                 pending={pending}
+                cartolaId={cartolaId}
               />
             ))}
           </ul>
@@ -386,7 +387,7 @@ export function ReconciliarClient({
                     <div className="truncate">
                       <span className="text-xs text-slate-500">App: </span>
                       <Link
-                        href={`/movimientos/${c.movimiento.id}`}
+                        href={`/movimientos/${c.movimiento.id}?volver=/cartolas/${cartolaId}/reconciliar`}
                         className="text-brand-700 hover:underline"
                       >
                         {c.movimiento.descripcion || "(sin descripción)"}
@@ -428,11 +429,13 @@ function SinMatchItem({
   movsLibres,
   onVincular,
   pending,
+  cartolaId,
 }: {
   linea: LineaInfo;
   movsLibres: MovInfo[];
   onVincular: (movId: string) => void;
   pending: boolean;
+  cartolaId: string;
 }) {
   const [open, setOpen] = useState(false);
   const [busqueda, setBusqueda] = useState("");
@@ -474,7 +477,7 @@ function SinMatchItem({
             {open ? "Cerrar" : "Vincular con..."}
           </button>
           <Link
-            href={`/movimientos/nuevo?tipo=${linea.tipo}`}
+            href={`/movimientos/nuevo?tipo=${linea.tipo}&volver=/cartolas/${cartolaId}/reconciliar`}
             className="text-xs text-brand-700 hover:underline self-center"
           >
             Crear movimiento nuevo →

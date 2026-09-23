@@ -226,7 +226,7 @@ function LineaFila({
           {linea.conciliado ? (
             linea.movs.length === 1 ? (
               <Link
-                href={`/movimientos/${linea.movs[0].movimiento_id}`}
+                href={`/movimientos/${linea.movs[0].movimiento_id}?volver=/cartolas/${cartolaId}`}
                 className="text-xs text-brand-700 hover:underline"
               >
                 Ver movimiento

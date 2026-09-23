@@ -17,6 +17,9 @@ export function resolverVolver(
   if (volver.startsWith("/eventos/")) {
     return { href: volver, label: "← Volver al evento" };
   }
+  if (/^\/cartolas\/[^/]+\/reconciliar/.test(volver)) {
+    return { href: volver, label: "← Volver a la reconciliación" };
+  }
   if (volver.startsWith("/cartolas/")) {
     return { href: volver, label: "← Volver a la cartola" };
   }
