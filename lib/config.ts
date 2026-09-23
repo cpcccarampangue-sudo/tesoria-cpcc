@@ -3,6 +3,7 @@
 
 export const INSTITUCION_NOMBRE = "Centro de Padres y Apoderados";
 export const INSTITUCION_COLEGIO = "Colegio Carampangue";
+export const INSTITUCION_CIUDAD = "Carampangue";
 
 export const TESORERO_NOMBRE = "Patricio Cáceres Barahona";
 export const TESORERO_RUT = "13.757.066-1";
