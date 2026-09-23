@@ -169,17 +169,17 @@ export default async function ImprimirActaPage({
           </div>
         )}
 
-        <header className="mb-6 flex items-center justify-center gap-4 border-b-2 border-slate-800 pb-3">
+        <header className="mb-6 flex items-center gap-5 border-b-2 border-slate-800 pb-3">
           <Image
             src="/logo.png"
             alt="Logo del colegio"
-            width={72}
-            height={72}
-            className="h-16 w-16 object-contain"
+            width={140}
+            height={140}
+            className="h-28 w-28 object-contain"
             priority
           />
-          <div className="text-center">
-            <div className="text-sm font-bold uppercase tracking-wide">
+          <div className="text-left">
+            <div className="text-base font-bold uppercase tracking-wide">
               {INSTITUCION_NOMBRE}
             </div>
             <div className="text-xs text-slate-600">Tesorería</div>
