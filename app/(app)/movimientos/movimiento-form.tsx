@@ -71,6 +71,11 @@ export function MovimientoForm({
     cuenta_id: initial?.cuenta_id ?? initialCuentaId ?? "",
   });
   const [adjuntosNuevos, setAdjuntosNuevos] = useState<AdjuntoLocal[]>([]);
+  // AdjuntosManager maneja su propio estado interno inicializado desde
+  // initialLocal solo en el primer render. Para forzar un reset limpio
+  // despues de "Agregar otro" cambiamos esta key: React remonta el
+  // componente y su estado arranca en blanco.
+  const [adjuntosKey, setAdjuntosKey] = useState(0);
   const [ultimo, setUltimo] = useState<{
     id: string;
     tipo: MovTipo;
@@ -127,6 +132,7 @@ export function MovimientoForm({
             cuenta_id: f.cuenta_id,
           }));
           setAdjuntosNuevos([]);
+          setAdjuntosKey((k) => k + 1);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error inesperado.");
@@ -296,6 +302,7 @@ export function MovimientoForm({
             En la vista de detalle se pueden seguir agregando después.
           </p>
           <AdjuntosManager
+            key={adjuntosKey}
             mode="local"
             uploadPrefix="nuevo"
             initialLocal={adjuntosNuevos}
