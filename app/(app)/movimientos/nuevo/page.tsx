@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { resolverVolver } from "@/lib/volver";
 import { MovimientoForm } from "../movimiento-form";
 
 export const metadata = { title: "Nuevo movimiento — Tesorería CPCC" };
@@ -8,7 +9,12 @@ export const metadata = { title: "Nuevo movimiento — Tesorería CPCC" };
 export default async function NuevoMovimientoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ evento_id?: string; tipo?: string; cuenta_id?: string }>;
+  searchParams: Promise<{
+    evento_id?: string;
+    tipo?: string;
+    cuenta_id?: string;
+    volver?: string;
+  }>;
 }) {
   await requireDirectiva();
   const params = await searchParams;
@@ -38,15 +44,19 @@ export default async function NuevoMovimientoPage({
   const principal = cuentasActivas.find((c) => c.es_principal);
   const initialCuentaId =
     params.cuenta_id ?? principal?.id ?? cuentasActivas[0]?.id ?? "";
+  const volver = resolverVolver(params.volver, {
+    href: "/movimientos",
+    label: "← Volver a movimientos",
+  });
 
   return (
     <div className="max-w-2xl space-y-4">
       <div>
         <Link
-          href="/movimientos"
+          href={volver.href}
           className="text-sm text-slate-600 hover:underline"
         >
-          ← Volver a movimientos
+          {volver.label}
         </Link>
       </div>
       <h1 className="text-2xl font-semibold">Nuevo movimiento</h1>
@@ -58,6 +68,8 @@ export default async function NuevoMovimientoPage({
           initialTipo={params.tipo === "egreso" ? "egreso" : "ingreso"}
           initialEventoId={params.evento_id ?? null}
           initialCuentaId={initialCuentaId}
+          volverHref={volver.href}
+          volverLabel={volver.label.replace(/^← /, "")}
         />
       </div>
     </div>

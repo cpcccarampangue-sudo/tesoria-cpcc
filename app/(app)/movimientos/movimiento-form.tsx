@@ -44,6 +44,8 @@ export function MovimientoForm({
   initialEventoId = null,
   initialCuentaId = "",
   initial,
+  volverHref = "/movimientos",
+  volverLabel = "Volver al listado",
 }: {
   categorias: CategoriaOption[];
   eventos: EventoOption[];
@@ -52,6 +54,8 @@ export function MovimientoForm({
   initialEventoId?: string | null;
   initialCuentaId?: string;
   initial?: Initial;
+  volverHref?: string;
+  volverLabel?: string;
 }) {
   const router = useRouter();
   const isEdit = !!initial?.id;
@@ -104,7 +108,8 @@ export function MovimientoForm({
         };
         if (isEdit && initial?.id) {
           await actualizarMovimiento(initial.id, payload);
-          router.push(`/movimientos/${initial.id}`);
+          const qs = volverHref !== "/movimientos" ? `?volver=${volverHref}` : "";
+          router.push(`/movimientos/${initial.id}${qs}`);
         } else {
           const id = await crearMovimiento({
             ...payload,
@@ -152,11 +157,16 @@ export function MovimientoForm({
             >
               Agregar otro
             </button>
-            <Link href={`/movimientos/${ultimo.id}`} className="btn-secondary">
+            <Link
+              href={`/movimientos/${ultimo.id}${
+                volverHref !== "/movimientos" ? `?volver=${volverHref}` : ""
+              }`}
+              className="btn-secondary"
+            >
               Ver movimiento
             </Link>
-            <Link href="/movimientos" className="btn-secondary">
-              Volver al listado
+            <Link href={volverHref} className="btn-secondary">
+              {volverLabel}
             </Link>
           </div>
         </div>

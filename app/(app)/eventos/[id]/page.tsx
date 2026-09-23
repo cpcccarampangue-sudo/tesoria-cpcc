@@ -71,7 +71,7 @@ export default async function EventoDetailPage({
               🖨️ Imprimir / PDF
             </Link>
             <Link
-              href={`/movimientos/nuevo?evento_id=${id}`}
+              href={`/movimientos/nuevo?evento_id=${id}&volver=/eventos/${id}`}
               className="btn-primary"
             >
               + Movimiento en este evento
@@ -152,7 +152,7 @@ export default async function EventoDetailPage({
                         </td>
                         <td className="table-td">
                           <Link
-                            href={`/movimientos/${m.id}`}
+                            href={`/movimientos/${m.id}?volver=/eventos/${id}`}
                             className="text-brand-700 hover:underline"
                           >
                             {m.descripcion || "(sin descripción)"}

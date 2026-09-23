@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCLP, formatFecha, formatFechaHora } from "@/lib/formatters";
+import { resolverVolver } from "@/lib/volver";
 import type {
   DirectivaCargo,
   Movimiento,
@@ -15,10 +16,17 @@ import { ActaSelector } from "./acta-selector";
 
 export default async function MovimientoDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ volver?: string }>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
+  const volver = resolverVolver(sp.volver, {
+    href: "/movimientos",
+    label: "← Volver a movimientos",
+  });
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
 
@@ -94,10 +102,10 @@ export default async function MovimientoDetailPage({
       <div className="max-w-2xl space-y-4">
         <div>
           <Link
-            href="/movimientos"
+            href={volver.href}
             className="text-sm text-slate-600 hover:underline"
           >
-            ← Volver a movimientos
+            {volver.label}
           </Link>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -212,10 +220,10 @@ export default async function MovimientoDetailPage({
     <div className="max-w-2xl space-y-4">
       <div>
         <Link
-          href="/movimientos"
+          href={volver.href}
           className="text-sm text-slate-600 hover:underline"
         >
-          ← Volver a movimientos
+          {volver.label}
         </Link>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -244,7 +252,7 @@ export default async function MovimientoDetailPage({
           <Link
             href={`/movimientos/nuevo?tipo=${m.tipo}${
               m.evento_id ? `&evento_id=${m.evento_id}` : ""
-            }`}
+            }${sp.volver ? `&volver=${sp.volver}` : ""}`}
             className="btn-secondary"
           >
             + Agregar otro
@@ -257,6 +265,8 @@ export default async function MovimientoDetailPage({
           categorias={categorias ?? []}
           eventos={eventos ?? []}
           cuentas={cuentasVisibles}
+          volverHref={volver.href}
+          volverLabel={volver.label.replace(/^← /, "")}
           initial={{
             id: m.id,
             fecha: m.fecha,
