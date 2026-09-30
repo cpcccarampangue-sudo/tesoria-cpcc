@@ -24,7 +24,8 @@ type PlantillaId =
   | "pago_cuotas"
   | "socio"
   | "donacion"
-  | "directiva";
+  | "directiva"
+  | "delegado_curso";
 
 type Plantilla = {
   id: PlantillaId;
@@ -32,6 +33,31 @@ type Plantilla = {
   subtitulo: string;
   cuerpo: string;
 };
+
+// Lista completa de cursos del colegio, desde Prekinder hasta 4° Medio, con
+// letras A, B y C por nivel. Se muestra en un <select> con optgroup para no
+// tener que escribir el curso a mano.
+const NIVELES: { nombre: string; niveles: string[] }[] = [
+  { nombre: "Educación Parvularia", niveles: ["Prekinder", "Kinder"] },
+  {
+    nombre: "Enseñanza Básica",
+    niveles: [
+      "1° Básico",
+      "2° Básico",
+      "3° Básico",
+      "4° Básico",
+      "5° Básico",
+      "6° Básico",
+      "7° Básico",
+      "8° Básico",
+    ],
+  },
+  {
+    nombre: "Enseñanza Media",
+    niveles: ["1° Medio", "2° Medio", "3° Medio", "4° Medio"],
+  },
+];
+const LETRAS = ["A", "B", "C"] as const;
 
 const PLANTILLAS: Plantilla[] = [
   {
@@ -68,6 +94,13 @@ const PLANTILLAS: Plantilla[] = [
     cuerpo:
       "El {{institucion}} del Colegio Carampangue certifica que {{nombre}}, cédula de identidad N° {{rut}}, forma parte de la directiva vigente del Centro de Padres durante el presente periodo, ejerciendo funciones oficiales del cargo asignado.\n\nSe extiende el presente certificado con fecha {{fecha}}, para los trámites que sean necesarios.",
   },
+  {
+    id: "delegado_curso",
+    label: "Delegado de curso",
+    subtitulo: "de delegado de curso",
+    cuerpo:
+      "El {{institucion}} del Colegio Carampangue certifica que {{nombre}}, cédula de identidad N° {{rut}}, se desempeña como delegado(a) del curso {{curso}} durante el presente periodo escolar, ejerciendo funciones de representación de los apoderados de ese curso ante el Centro de Padres.\n\nSe extiende el presente certificado con fecha {{fecha}}, para los trámites que sean necesarios.",
+  },
 ];
 
 export function CertificadoForm({
@@ -83,6 +116,7 @@ export function CertificadoForm({
   const [personaRut, setPersonaRut] = useState("");
   const [fecha, setFecha] = useState(todayISO());
   const [monto, setMonto] = useState("");
+  const [curso, setCurso] = useState("");
   const [firmantes, setFirmantes] = useState<Set<DirectivaCargo>>(
     new Set(["tesorero"])
   );
@@ -131,6 +165,7 @@ export function CertificadoForm({
     if (personaNombre.trim()) params.set("nombre", personaNombre.trim());
     if (personaRut.trim()) params.set("rut", personaRut.trim());
     if (montoNum) params.set("monto", String(montoNum));
+    if (curso.trim()) params.set("curso", curso.trim());
     params.set("firmantes", Array.from(firmantes).join(","));
 
     const url = `/imprimir/certificados?${params.toString()}`;
@@ -206,7 +241,8 @@ export function CertificadoForm({
         <p className="text-xs text-slate-500 mt-1">
           Variables disponibles: <code>{"{{nombre}}"}</code>,{" "}
           <code>{"{{rut}}"}</code>, <code>{"{{fecha}}"}</code>,{" "}
-          <code>{"{{monto}}"}</code>, <code>{"{{institucion}}"}</code>.
+          <code>{"{{monto}}"}</code>, <code>{"{{curso}}"}</code>,{" "}
+          <code>{"{{institucion}}"}</code>.
         </p>
       </div>
 
@@ -241,7 +277,7 @@ export function CertificadoForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className="label">Fecha de emisión</label>
           <input
@@ -271,6 +307,32 @@ export function CertificadoForm({
               {formatCLP(montoNum)} · {formatNumber(montoNum)} pesos
             </div>
           )}
+        </div>
+        <div>
+          <label className="label">
+            Curso{" "}
+            <span className="text-xs text-slate-500 font-normal">
+              (opcional)
+            </span>
+          </label>
+          <select
+            className="input"
+            value={curso}
+            onChange={(e) => setCurso(e.target.value)}
+          >
+            <option value="">— seleccionar —</option>
+            {NIVELES.map((grupo) => (
+              <optgroup key={grupo.nombre} label={grupo.nombre}>
+                {grupo.niveles.flatMap((nivel) =>
+                  LETRAS.map((letra) => (
+                    <option key={`${nivel}-${letra}`} value={`${nivel} ${letra}`}>
+                      {nivel} {letra}
+                    </option>
+                  ))
+                )}
+              </optgroup>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -327,6 +389,7 @@ export function CertificadoForm({
             setPersonaNombre("");
             setPersonaRut("");
             setMonto("");
+            setCurso("");
             setError(null);
           }}
         >

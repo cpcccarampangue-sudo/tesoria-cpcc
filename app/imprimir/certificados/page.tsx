@@ -100,6 +100,7 @@ export default async function ImprimirCertificadoPage({
     rut?: string;
     fecha?: string;
     monto?: string;
+    curso?: string;
     firmantes?: string | string[];
   }>;
 }) {
@@ -116,6 +117,7 @@ export default async function ImprimirCertificadoPage({
   const montoRaw = firstParam(sp.monto);
   const monto = Number(montoRaw);
   const montoValido = Number.isFinite(monto) && monto > 0;
+  const curso = firstParam(sp.curso).trim();
   const cargosPedidos = parseFirmantes(sp.firmantes);
 
   const supabase = await createSupabaseServerClient();
@@ -137,6 +139,7 @@ export default async function ImprimirCertificadoPage({
     rut,
     fecha: fechaLarga,
     monto: montoValido ? formatCLP(monto) : "",
+    curso,
     institucion: INSTITUCION_NOMBRE,
   };
 
