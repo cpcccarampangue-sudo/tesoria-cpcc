@@ -30,6 +30,7 @@ export default async function AppLayout({
     { href: "/eventos", label: "Eventos" },
     { href: "/apoderados", label: "Familias" },
     { href: "/actas", label: "Actas" },
+    { href: "/certificados", label: "Certificados" },
     { href: "/categorias", label: "Categorías" },
     { href: "/reportes", label: "Reportes" },
     { href: "/directiva", label: "Directiva" },
