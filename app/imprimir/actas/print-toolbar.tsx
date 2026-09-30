@@ -1,6 +1,13 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 export function PrintToolbar() {
+  const searchParams = useSearchParams();
+  // Preserva los params al volver al formulario, para que la usuaria pueda
+  // editar cualquier campo sin perder lo que ya escribio.
+  const volverHref = `/actas?${searchParams.toString()}`;
+
   return (
     <div className="no-print sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white/95 backdrop-blur px-4 py-3">
       <div className="text-sm text-slate-600">
@@ -16,8 +23,8 @@ export function PrintToolbar() {
         .
       </div>
       <div className="flex items-center gap-2">
-        <a href="/actas" className="btn-secondary">
-          ← Volver a actas
+        <a href={volverHref} className="btn-secondary">
+          ← Volver y editar
         </a>
         <button
           type="button"

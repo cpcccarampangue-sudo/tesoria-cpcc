@@ -32,6 +32,7 @@ export function ActaForm({
   personaRutInicial = "",
   ciudadInicial = "",
   medioInicial = "efectivo",
+  firmantesIniciales,
 }: {
   cargosActivos: DirectivaCargo[];
   direccionInicial?: Direccion;
@@ -42,6 +43,7 @@ export function ActaForm({
   personaRutInicial?: string;
   ciudadInicial?: string;
   medioInicial?: Medio;
+  firmantesIniciales?: DirectivaCargo[];
 }) {
   const [direccion, setDireccion] = useState<Direccion>(direccionInicial);
   const [monto, setMonto] = useState(montoInicial);
@@ -52,7 +54,7 @@ export function ActaForm({
   const [ciudad, setCiudad] = useState(ciudadInicial);
   const [medio, setMedio] = useState<Medio>(medioInicial);
   const [firmantes, setFirmantes] = useState<Set<DirectivaCargo>>(
-    new Set(["tesorero"])
+    new Set(firmantesIniciales ?? ["tesorero"])
   );
   const [error, setError] = useState<string | null>(null);
 

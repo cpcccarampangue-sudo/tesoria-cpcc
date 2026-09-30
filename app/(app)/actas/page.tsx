@@ -6,9 +6,32 @@ import { ActaForm } from "./acta-form";
 export const metadata = { title: "Actas — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
+const CARGOS_VALIDOS: DirectivaCargo[] = [
+  "presidente",
+  "vicepresidente",
+  "tesorero",
+  "protesorero",
+  "secretario",
+  "director",
+];
+
 function firstParam(raw: string | string[] | undefined): string {
   if (Array.isArray(raw)) return raw[0] ?? "";
   return raw ?? "";
+}
+
+function parseFirmantes(
+  raw: string | string[] | undefined
+): DirectivaCargo[] | undefined {
+  const value = firstParam(raw);
+  if (!value) return undefined;
+  const cargos = value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is DirectivaCargo =>
+      CARGOS_VALIDOS.includes(s as DirectivaCargo)
+    );
+  return cargos.length > 0 ? cargos : undefined;
 }
 
 export default async function ActasPage({
@@ -23,6 +46,7 @@ export default async function ActasPage({
     persona_rut?: string;
     ciudad?: string;
     medio?: string;
+    firmantes?: string | string[];
   }>;
 }) {
   await requireDirectiva();
@@ -59,9 +83,9 @@ export default async function ActasPage({
 
       {prellenado && (
         <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
-          El formulario viene <strong>prellenado</strong> con los datos del
-          movimiento. Ajusta lo que necesites (persona, RUT, ciudad, medio,
-          firmantes) y presiona <strong>Generar acta</strong>.
+          El formulario viene <strong>prellenado</strong>. Ajusta lo que
+          necesites (persona, RUT, ciudad, medio, firmantes) y presiona{" "}
+          <strong>Generar acta</strong>.
         </div>
       )}
 
@@ -76,6 +100,7 @@ export default async function ActasPage({
           personaRutInicial={firstParam(sp.persona_rut)}
           ciudadInicial={firstParam(sp.ciudad)}
           medioInicial={medioInicial}
+          firmantesIniciales={parseFirmantes(sp.firmantes)}
         />
       </div>
 
