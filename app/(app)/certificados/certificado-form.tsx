@@ -12,8 +12,10 @@ import {
   todayISO,
 } from "@/lib/formatters";
 
-// Cargos que tiene sentido ofrecer como acompanantes del tesorero.
-const CARGOS_ACOMPANANTES: DirectivaCargo[] = [
+// Cargos que se pueden marcar como firmantes del documento. El tesorero
+// aparece primero pero, a diferencia de las actas, no es obligatorio.
+const CARGOS_FIRMANTES: DirectivaCargo[] = [
+  "tesorero",
   "presidente",
   "vicepresidente",
   "secretario",
@@ -105,25 +107,48 @@ const PLANTILLAS: Plantilla[] = [
 
 export function CertificadoForm({
   cargosActivos,
+  tituloInicial = "CERTIFICADO",
+  subtituloInicial = "",
+  cuerpoInicial = "",
+  nombreInicial = "",
+  rutInicial = "",
+  fechaInicial = "",
+  montoInicial = "",
+  cursoInicial = "",
+  firmantesIniciales,
 }: {
   cargosActivos: DirectivaCargo[];
+  tituloInicial?: string;
+  subtituloInicial?: string;
+  cuerpoInicial?: string;
+  nombreInicial?: string;
+  rutInicial?: string;
+  fechaInicial?: string;
+  montoInicial?: string;
+  cursoInicial?: string;
+  firmantesIniciales?: DirectivaCargo[];
 }) {
+  // Si viene una plantilla prellenada (subtitulo/cuerpo), no reaplicamos
+  // ninguna plantilla al arrancar — el usuario ya edito estos campos.
   const [plantillaId, setPlantillaId] = useState<PlantillaId>("blanco");
-  const [titulo, setTitulo] = useState("CERTIFICADO");
-  const [subtitulo, setSubtitulo] = useState("");
-  const [cuerpo, setCuerpo] = useState("");
-  const [personaNombre, setPersonaNombre] = useState("");
-  const [personaRut, setPersonaRut] = useState("");
-  const [fecha, setFecha] = useState(todayISO());
-  const [monto, setMonto] = useState("");
-  const [curso, setCurso] = useState("");
+  const [titulo, setTitulo] = useState(tituloInicial);
+  const [subtitulo, setSubtitulo] = useState(subtituloInicial);
+  const [cuerpo, setCuerpo] = useState(cuerpoInicial);
+  const [personaNombre, setPersonaNombre] = useState(nombreInicial);
+  const [personaRut, setPersonaRut] = useState(rutInicial);
+  const [fecha, setFecha] = useState(fechaInicial || todayISO());
+  const [monto, setMonto] = useState(montoInicial);
+  const [curso, setCurso] = useState(cursoInicial);
   const [firmantes, setFirmantes] = useState<Set<DirectivaCargo>>(
-    new Set(["tesorero"])
+    new Set(firmantesIniciales ?? ["tesorero"])
   );
   const [error, setError] = useState<string | null>(null);
 
-  const acompanantes = CARGOS_ACOMPANANTES.filter((c) =>
-    cargosActivos.includes(c)
+  const firmantesDisponibles = CARGOS_FIRMANTES.filter((c) =>
+    // Tesorero siempre disponible aunque no este en el listado (por el
+    // default de config.ts). El resto solo si hay un miembro activo con
+    // ese cargo en la directiva.
+    c === "tesorero" || cargosActivos.includes(c)
   );
 
   const montoNum = parseCLPInput(monto);
@@ -152,8 +177,8 @@ export function CertificadoForm({
       setError("El cuerpo del certificado no puede estar vacío.");
       return;
     }
-    if (!firmantes.has("tesorero")) {
-      setError("La firma del tesorero/a es obligatoria.");
+    if (firmantes.size === 0) {
+      setError("Selecciona al menos un firmante.");
       return;
     }
 
@@ -339,31 +364,21 @@ export function CertificadoForm({
       <div>
         <label className="label">Firmantes por el CdP</label>
         <div className="space-y-1 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked
-              disabled
-              className="opacity-60"
-            />
-            <span>Tesorero/a (siempre firma)</span>
-          </label>
-          {acompanantes.length === 0 ? (
+          {firmantesDisponibles.map((c) => (
+            <label key={c} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={firmantes.has(c)}
+                onChange={() => toggleFirmante(c)}
+              />
+              <span>{DIRECTIVA_CARGO_LABEL[c]}</span>
+            </label>
+          ))}
+          {firmantesDisponibles.length === 1 && (
             <p className="text-xs text-slate-500 mt-1">
-              No hay otros cargos activos en la directiva. Puedes agregarlos
-              en la sección <strong>Directiva</strong>.
+              Solo aparece el tesorero. Para incluir otros cargos, agrégalos
+              como miembros activos en la sección <strong>Directiva</strong>.
             </p>
-          ) : (
-            acompanantes.map((c) => (
-              <label key={c} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={firmantes.has(c)}
-                  onChange={() => toggleFirmante(c)}
-                />
-                <span>{DIRECTIVA_CARGO_LABEL[c]}</span>
-              </label>
-            ))
           )}
         </div>
       </div>

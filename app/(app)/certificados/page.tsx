@@ -6,9 +6,52 @@ import { CertificadoForm } from "./certificado-form";
 export const metadata = { title: "Certificados — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
-export default async function CertificadosPage() {
+const CARGOS_VALIDOS: DirectivaCargo[] = [
+  "presidente",
+  "vicepresidente",
+  "tesorero",
+  "protesorero",
+  "secretario",
+  "director",
+];
+
+function firstParam(raw: string | string[] | undefined): string {
+  if (Array.isArray(raw)) return raw[0] ?? "";
+  return raw ?? "";
+}
+
+function parseFirmantes(
+  raw: string | string[] | undefined
+): DirectivaCargo[] | undefined {
+  const value = firstParam(raw);
+  if (!value) return undefined;
+  const cargos = value
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is DirectivaCargo =>
+      CARGOS_VALIDOS.includes(s as DirectivaCargo)
+    );
+  return cargos.length > 0 ? cargos : undefined;
+}
+
+export default async function CertificadosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    titulo?: string;
+    subtitulo?: string;
+    cuerpo?: string;
+    nombre?: string;
+    rut?: string;
+    fecha?: string;
+    monto?: string;
+    curso?: string;
+    firmantes?: string | string[];
+  }>;
+}) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
+  const sp = await searchParams;
 
   const { data: directivaActiva } = await supabase
     .from("directiva_miembros")
@@ -17,6 +60,8 @@ export default async function CertificadosPage() {
   const cargosActivos = (
     (directivaActiva as { cargo: DirectivaCargo }[] | null) ?? []
   ).map((d) => d.cargo);
+
+  const prellenado = !!sp.cuerpo || !!sp.titulo;
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -29,8 +74,27 @@ export default async function CertificadosPage() {
         </p>
       </div>
 
+      {prellenado && (
+        <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+          El formulario viene <strong>prellenado</strong> con los datos del
+          certificado anterior. Ajusta lo que necesites y presiona{" "}
+          <strong>Generar certificado</strong> otra vez.
+        </div>
+      )}
+
       <div className="card">
-        <CertificadoForm cargosActivos={cargosActivos} />
+        <CertificadoForm
+          cargosActivos={cargosActivos}
+          tituloInicial={firstParam(sp.titulo)}
+          subtituloInicial={firstParam(sp.subtitulo)}
+          cuerpoInicial={firstParam(sp.cuerpo)}
+          nombreInicial={firstParam(sp.nombre)}
+          rutInicial={firstParam(sp.rut)}
+          fechaInicial={firstParam(sp.fecha)}
+          montoInicial={firstParam(sp.monto)}
+          cursoInicial={firstParam(sp.curso)}
+          firmantesIniciales={parseFirmantes(sp.firmantes)}
+        />
       </div>
 
       <div className="card bg-slate-50 text-sm text-slate-600 space-y-2">
