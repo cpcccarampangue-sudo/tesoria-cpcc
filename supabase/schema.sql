@@ -188,6 +188,7 @@ create table if not exists directiva_miembros (
   activo boolean not null default true,
   orden int not null default 0,
   profile_id uuid references profiles(id) on delete set null,
+  firma_path text,
   created_at timestamptz not null default now()
 );
 create index if not exists idx_directiva_cargo_activo
@@ -607,12 +608,19 @@ insert into storage.buckets (id, name, public)
 values ('cartolas', 'cartolas', false)
 on conflict (id) do nothing;
 
+insert into storage.buckets (id, name, public)
+values ('firmas', 'firmas', false)
+on conflict (id) do nothing;
+
 drop policy if exists boletas_directiva_select on storage.objects;
 drop policy if exists boletas_directiva_insert on storage.objects;
 drop policy if exists boletas_directiva_delete on storage.objects;
 drop policy if exists cartolas_directiva_storage_select on storage.objects;
 drop policy if exists cartolas_directiva_storage_insert on storage.objects;
 drop policy if exists cartolas_directiva_storage_delete on storage.objects;
+drop policy if exists firmas_directiva_select on storage.objects;
+drop policy if exists firmas_directiva_insert on storage.objects;
+drop policy if exists firmas_directiva_delete on storage.objects;
 
 create policy boletas_directiva_select on storage.objects
   for select using (bucket_id = 'boletas' and is_directiva());
@@ -627,6 +635,13 @@ create policy cartolas_directiva_storage_insert on storage.objects
   for insert with check (bucket_id = 'cartolas' and is_directiva());
 create policy cartolas_directiva_storage_delete on storage.objects
   for delete using (bucket_id = 'cartolas' and is_directiva());
+
+create policy firmas_directiva_select on storage.objects
+  for select using (bucket_id = 'firmas' and is_directiva());
+create policy firmas_directiva_insert on storage.objects
+  for insert with check (bucket_id = 'firmas' and is_directiva());
+create policy firmas_directiva_delete on storage.objects
+  for delete using (bucket_id = 'firmas' and is_directiva());
 
 -- =============================================================================
 -- SEED: categorías iniciales (opcional, útil para arrancar)

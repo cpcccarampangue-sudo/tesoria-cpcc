@@ -19,6 +19,7 @@ import {
   type DirectivaMiembro,
   type Movimiento,
 } from "@/lib/types";
+import { resolverFirmantes, type FirmanteConFirma } from "@/lib/firmas";
 import { PrintToolbar } from "./print-toolbar";
 
 export const dynamic = "force-dynamic";
@@ -32,9 +33,6 @@ const CARGOS_VALIDOS: DirectivaCargo[] = [
   "secretario",
   "director",
 ];
-
-// Firmante = miembro real de la directiva, o valor por defecto (solo tesorero).
-type Firmante = { cargo: DirectivaCargo; nombre: string; rut: string };
 
 function parseFirmantes(raw: string | string[] | undefined): DirectivaCargo[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw ?? "tesorero";
@@ -95,22 +93,10 @@ export default async function ImprimirActaMovimientoPage({
 
   // Resolver firmantes: buscar miembro activo por cargo. Si no hay y el cargo
   // es "tesorero", caemos al valor por defecto para no romper la funcionalidad.
-  const firmantes: Firmante[] = [];
-  for (const cargo of cargosPedidos) {
-    const miembro = directivaActiva.find((d) => d.cargo === cargo);
-    if (miembro) {
-      firmantes.push({ cargo, nombre: miembro.nombre, rut: miembro.rut });
-    } else if (cargo === "tesorero") {
-      firmantes.push({
-        cargo: "tesorero",
-        nombre: TESORERO_NOMBRE,
-        rut: TESORERO_RUT,
-      });
-    }
-    // Si el cargo pedido no tiene miembro activo (y no es tesorero), simplemente
-    // no aparece. El aviso al usuario ocurre en el detalle del movimiento donde
-    // se elige, asi que aca no interrumpimos la impresion.
-  }
+  const firmantes = await resolverFirmantes(cargosPedidos, directivaActiva, {
+    nombre: TESORERO_NOMBRE,
+    rut: TESORERO_RUT,
+  });
 
   const fechaMovLarga = formatFechaLarga(m.fecha);
   const hoy = formatFechaLarga(new Date());
@@ -121,11 +107,12 @@ export default async function ImprimirActaMovimientoPage({
     "Egreso registrado en tesorería";
 
   // Para el prefacio, mencionamos al tesorero (el que entrega la plata).
-  const tesoreroFirmante =
+  const tesoreroFirmante: FirmanteConFirma =
     firmantes.find((f) => f.cargo === "tesorero") ?? {
       cargo: "tesorero" as DirectivaCargo,
       nombre: TESORERO_NOMBRE,
       rut: TESORERO_RUT,
+      firmaUrl: null,
     };
 
   return (
@@ -227,55 +214,20 @@ export default async function ImprimirActaMovimientoPage({
         </p>
 
         {firmantes.length === 1 ? (
-          // Caso simple: solo firma el que recibe y el tesorero, uno al lado
-          // del otro para aprovechar el espacio.
           <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
-            <div className="text-center">
-              <div className="mb-1 border-t border-slate-800" />
-              <div className="font-bold uppercase">Recibe conforme</div>
-              <div className="mt-1">Nombre: ______________________________</div>
-              <div>RUT: __________________________________</div>
-              <div>Firma</div>
-            </div>
-            <div className="text-center">
-              <div className="mb-1 border-t border-slate-800" />
-              <div className="font-bold uppercase">
-                {DIRECTIVA_CARGO_LABEL[firmantes[0].cargo]}
-              </div>
-              <div className="mt-1">{firmantes[0].nombre}</div>
-              <div>
-                RUT: {firmantes[0].rut?.trim() || "__________________________"}
-              </div>
-              <div>{INSTITUCION_NOMBRE}</div>
-            </div>
+            <RecibeConformeBlock />
+            <FirmaCargoBlock f={firmantes[0]} />
           </div>
         ) : (
           <>
-            {/* Firma del que recibe */}
-            <div className="mt-14 flex justify-center">
-              <div className="w-72 text-center text-[12px]">
-                <div className="mb-1 border-t border-slate-800" />
-                <div className="font-bold uppercase">Recibe conforme</div>
-                <div className="mt-1">Nombre: ______________________________</div>
-                <div>RUT: __________________________________</div>
-                <div>Firma</div>
+            <div className="mt-14 flex justify-center text-[12px]">
+              <div className="w-72">
+                <RecibeConformeBlock />
               </div>
             </div>
-
-            {/* Firmas del CdP (2 o mas) */}
             <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
               {firmantes.map((f) => (
-                <div key={f.cargo} className="text-center">
-                  <div className="mb-1 border-t border-slate-800" />
-                  <div className="font-bold uppercase">
-                    {DIRECTIVA_CARGO_LABEL[f.cargo]}
-                  </div>
-                  <div className="mt-1">{f.nombre}</div>
-                  <div>
-                    RUT: {f.rut?.trim() || "__________________________"}
-                  </div>
-                  <div>{INSTITUCION_NOMBRE}</div>
-                </div>
+                <FirmaCargoBlock key={f.cargo} f={f} />
               ))}
             </div>
           </>
@@ -288,5 +240,42 @@ export default async function ImprimirActaMovimientoPage({
         </footer>
       </div>
     </>
+  );
+}
+
+function RecibeConformeBlock() {
+  return (
+    <div className="text-center">
+      <div className="h-14 print:h-16" aria-hidden />
+      <div className="border-t border-slate-800" />
+      <div className="font-bold uppercase mt-1">Recibe conforme</div>
+      <div className="mt-1">Nombre: ______________________________</div>
+      <div>RUT: __________________________________</div>
+      <div>Firma</div>
+    </div>
+  );
+}
+
+function FirmaCargoBlock({ f }: { f: FirmanteConFirma }) {
+  return (
+    <div className="text-center">
+      <div className="h-14 print:h-16 flex items-end justify-center overflow-hidden">
+        {f.firmaUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={f.firmaUrl}
+            alt={`Firma ${f.nombre}`}
+            className="max-h-full max-w-[180px] object-contain"
+          />
+        )}
+      </div>
+      <div className="border-t border-slate-800" />
+      <div className="font-bold uppercase mt-1">
+        {DIRECTIVA_CARGO_LABEL[f.cargo]}
+      </div>
+      <div className="mt-1">{f.nombre}</div>
+      <div>RUT: {f.rut?.trim() || "__________________________"}</div>
+      <div>{INSTITUCION_NOMBRE}</div>
+    </div>
   );
 }

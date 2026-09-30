@@ -200,6 +200,7 @@ export type DirectivaMiembro = {
   activo: boolean;
   orden: number;
   profile_id: string | null;
+  firma_path: string | null;
   created_at: string;
 };
 

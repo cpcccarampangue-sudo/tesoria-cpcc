@@ -18,6 +18,24 @@ export default async function DirectivaPage() {
     .order("nombre");
   const miembros = (data as DirectivaMiembro[] | null) ?? [];
 
+  // Cargamos signed URLs de las firmas en batch para mostrar la previa.
+  const firmaUrls = new Map<string, string>();
+  const conFirma = miembros.filter((m) => m.firma_path);
+  if (conFirma.length > 0) {
+    const paths = conFirma
+      .map((m) => m.firma_path)
+      .filter((p): p is string => !!p);
+    const { data: signed } = await supabase.storage
+      .from("firmas")
+      .createSignedUrls(paths, 3600);
+    for (const s of signed ?? []) {
+      if (s.signedUrl) {
+        const miembro = conFirma.find((m) => m.firma_path === s.path);
+        if (miembro) firmaUrls.set(miembro.id, s.signedUrl);
+      }
+    }
+  }
+
   // Cargos activos actuales, para el resumen arriba.
   const activosPorCargo = new Map<string, DirectivaMiembro>();
   for (const m of miembros) {
@@ -84,18 +102,25 @@ export default async function DirectivaPage() {
               <th className="table-th">RUT</th>
               <th className="table-th">Cargo</th>
               <th className="table-th">Estado</th>
+              <th className="table-th">Firma</th>
               <th className="table-th text-right">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {miembros.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-4 text-center text-slate-500">
+                <td colSpan={6} className="py-4 text-center text-slate-500">
                   Aún no hay miembros registrados.
                 </td>
               </tr>
             ) : (
-              miembros.map((m) => <MiembroRow key={m.id} m={m} />)
+              miembros.map((m) => (
+                <MiembroRow
+                  key={m.id}
+                  m={m}
+                  firmaUrl={firmaUrls.get(m.id) ?? null}
+                />
+              ))
             )}
           </tbody>
         </table>

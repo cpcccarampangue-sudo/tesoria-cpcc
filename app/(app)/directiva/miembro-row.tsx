@@ -8,8 +8,15 @@ import {
   eliminarMiembroDirectiva,
   toggleMiembroDirectiva,
 } from "./actions";
+import { FirmaCell } from "./firma-cell";
 
-export function MiembroRow({ m }: { m: DirectivaMiembro }) {
+export function MiembroRow({
+  m,
+  firmaUrl,
+}: {
+  m: DirectivaMiembro;
+  firmaUrl: string | null;
+}) {
   const [pending, startTransition] = useTransition();
   const [editando, setEditando] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -93,6 +100,9 @@ export function MiembroRow({ m }: { m: DirectivaMiembro }) {
             <span className="badge-slate">Inactivo</span>
           )}
         </td>
+        <td className="py-2 pr-2">
+          <FirmaCell miembroId={m.id} firmaUrl={firmaUrl} />
+        </td>
         <td className="py-2 pr-2 text-right">
           <button
             className="btn-primary text-xs"
@@ -135,6 +145,9 @@ export function MiembroRow({ m }: { m: DirectivaMiembro }) {
         ) : (
           <span className="badge-slate">Inactivo</span>
         )}
+      </td>
+      <td className="py-2 pr-2">
+        <FirmaCell miembroId={m.id} firmaUrl={firmaUrl} />
       </td>
       <td className="py-2 pr-2 text-right text-xs">
         <button

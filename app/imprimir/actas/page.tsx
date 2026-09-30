@@ -16,6 +16,7 @@ import {
   type DirectivaCargo,
   type DirectivaMiembro,
 } from "@/lib/types";
+import { resolverFirmantes, type FirmanteConFirma } from "@/lib/firmas";
 import { PrintToolbar } from "./print-toolbar";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +33,6 @@ const CARGOS_VALIDOS: DirectivaCargo[] = [
 
 type Direccion = "egreso" | "ingreso";
 type Medio = "efectivo" | "transferencia" | "cheque";
-type Firmante = { cargo: DirectivaCargo; nombre: string; rut: string };
 
 const MEDIO_LABEL: Record<Medio, string> = {
   efectivo: "Efectivo",
@@ -113,25 +113,17 @@ export default async function ImprimirActaPage({
     .eq("activo", true);
   const directivaActiva = (dirData as DirectivaMiembro[] | null) ?? [];
 
-  const firmantes: Firmante[] = [];
-  for (const cargo of cargosPedidos) {
-    const miembro = directivaActiva.find((d) => d.cargo === cargo);
-    if (miembro) {
-      firmantes.push({ cargo, nombre: miembro.nombre, rut: miembro.rut });
-    } else if (cargo === "tesorero") {
-      firmantes.push({
-        cargo: "tesorero",
-        nombre: TESORERO_NOMBRE,
-        rut: TESORERO_RUT,
-      });
-    }
-  }
+  const firmantes = await resolverFirmantes(cargosPedidos, directivaActiva, {
+    nombre: TESORERO_NOMBRE,
+    rut: TESORERO_RUT,
+  });
 
-  const tesoreroFirmante =
+  const tesoreroFirmante: FirmanteConFirma =
     firmantes.find((f) => f.cargo === "tesorero") ?? {
       cargo: "tesorero" as DirectivaCargo,
       nombre: TESORERO_NOMBRE,
       rut: TESORERO_RUT,
+      firmaUrl: null,
     };
 
   const fechaLarga = formatFechaLarga(fecha);
@@ -241,66 +233,26 @@ export default async function ImprimirActaPage({
           // Caso simple: solo firma la contraparte y el tesorero, uno al lado
           // del otro para aprovechar el espacio.
           <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
-            <div className="text-center">
-              <div className="mb-1 border-t border-slate-800" />
-              <div className="font-bold uppercase">
-                {direccion === "egreso" ? "Recibe conforme" : "Entrega conforme"}
-              </div>
-              <div className="mt-1">
-                Nombre: {personaNombre || "______________________________"}
-              </div>
-              <div>
-                RUT: {personaRut || "__________________________________"}
-              </div>
-              <div>Firma</div>
-            </div>
-            <div className="text-center">
-              <div className="mb-1 border-t border-slate-800" />
-              <div className="font-bold uppercase">
-                {DIRECTIVA_CARGO_LABEL[firmantes[0].cargo]}
-              </div>
-              <div className="mt-1">{firmantes[0].nombre}</div>
-              <div>
-                RUT: {firmantes[0].rut?.trim() || "__________________________"}
-              </div>
-              <div>{INSTITUCION_NOMBRE}</div>
-            </div>
+            <ContraparteBlock direccion={direccion} nombre={personaNombre} rut={personaRut} />
+            <FirmaCargoBlock f={firmantes[0]} />
           </div>
         ) : (
           <>
             {/* Firma de la contraparte (recibe o entrega segun direccion) */}
-            <div className="mt-14 flex justify-center">
-              <div className="w-72 text-center text-[12px]">
-                <div className="mb-1 border-t border-slate-800" />
-                <div className="font-bold uppercase">
-                  {direccion === "egreso"
-                    ? "Recibe conforme"
-                    : "Entrega conforme"}
-                </div>
-                <div className="mt-1">
-                  Nombre: {personaNombre || "______________________________"}
-                </div>
-                <div>
-                  RUT: {personaRut || "__________________________________"}
-                </div>
-                <div>Firma</div>
+            <div className="mt-14 flex justify-center text-[12px]">
+              <div className="w-72">
+                <ContraparteBlock
+                  direccion={direccion}
+                  nombre={personaNombre}
+                  rut={personaRut}
+                />
               </div>
             </div>
 
             {/* Firmas de la directiva (2 o mas) */}
             <div className="mt-14 grid grid-cols-2 gap-8 text-[12px]">
               {firmantes.map((f) => (
-                <div key={f.cargo} className="text-center">
-                  <div className="mb-1 border-t border-slate-800" />
-                  <div className="font-bold uppercase">
-                    {DIRECTIVA_CARGO_LABEL[f.cargo]}
-                  </div>
-                  <div className="mt-1">{f.nombre}</div>
-                  <div>
-                    RUT: {f.rut?.trim() || "__________________________"}
-                  </div>
-                  <div>{INSTITUCION_NOMBRE}</div>
-                </div>
+                <FirmaCargoBlock key={f.cargo} f={f} />
               ))}
             </div>
           </>
@@ -327,7 +279,7 @@ function ActaEgresoPrefacio({
   fechaLarga: string;
   personaNombre: string;
   personaRut: string;
-  tesorero: Firmante;
+  tesorero: FirmanteConFirma;
 }) {
   return (
     <p>
@@ -379,7 +331,7 @@ function ActaIngresoPrefacio({
   fechaLarga: string;
   personaNombre: string;
   personaRut: string;
-  tesorero: Firmante;
+  tesorero: FirmanteConFirma;
 }) {
   return (
     <p>
@@ -417,5 +369,59 @@ function ActaIngresoPrefacio({
       )}
       , la suma de:
     </p>
+  );
+}
+
+// Bloque de firma de la contraparte (persona que recibe o entrega la plata).
+// No trae firma escaneada — la persona firma en el papel a mano.
+function ContraparteBlock({
+  direccion,
+  nombre,
+  rut,
+}: {
+  direccion: Direccion;
+  nombre: string;
+  rut: string;
+}) {
+  return (
+    <div className="text-center">
+      <div className="h-14 print:h-16" aria-hidden />
+      <div className="border-t border-slate-800" />
+      <div className="font-bold uppercase mt-1">
+        {direccion === "egreso" ? "Recibe conforme" : "Entrega conforme"}
+      </div>
+      <div className="mt-1">
+        Nombre: {nombre || "______________________________"}
+      </div>
+      <div>RUT: {rut || "__________________________________"}</div>
+      <div>Firma</div>
+    </div>
+  );
+}
+
+// Bloque de firma de un miembro de la directiva. Si el miembro tiene firma
+// escaneada cargada en su perfil, la muestra sobre la linea; si no, deja el
+// espacio en blanco para firmar a mano.
+function FirmaCargoBlock({ f }: { f: FirmanteConFirma }) {
+  return (
+    <div className="text-center">
+      <div className="h-14 print:h-16 flex items-end justify-center overflow-hidden">
+        {f.firmaUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={f.firmaUrl}
+            alt={`Firma ${f.nombre}`}
+            className="max-h-full max-w-[180px] object-contain"
+          />
+        )}
+      </div>
+      <div className="border-t border-slate-800" />
+      <div className="font-bold uppercase mt-1">
+        {DIRECTIVA_CARGO_LABEL[f.cargo]}
+      </div>
+      <div className="mt-1">{f.nombre}</div>
+      <div>RUT: {f.rut?.trim() || "__________________________"}</div>
+      <div>{INSTITUCION_NOMBRE}</div>
+    </div>
   );
 }

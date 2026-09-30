@@ -12,6 +12,7 @@ import {
   type DirectivaCargo,
   type DirectivaMiembro,
 } from "@/lib/types";
+import { resolverFirmantes, type FirmanteConFirma } from "@/lib/firmas";
 import { PrintToolbar } from "./print-toolbar";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +26,6 @@ const CARGOS_VALIDOS: DirectivaCargo[] = [
   "secretario",
   "director",
 ];
-
-type Firmante = { cargo: DirectivaCargo; nombre: string; rut: string };
 
 function parseFirmantes(raw: string | string[] | undefined): DirectivaCargo[] {
   const value = Array.isArray(raw) ? raw.join(",") : raw ?? "tesorero";
@@ -126,19 +125,10 @@ export default async function ImprimirCertificadoPage({
     .eq("activo", true);
   const directivaActiva = (dirData as DirectivaMiembro[] | null) ?? [];
 
-  const firmantes: Firmante[] = [];
-  for (const cargo of cargosPedidos) {
-    const miembro = directivaActiva.find((d) => d.cargo === cargo);
-    if (miembro) {
-      firmantes.push({ cargo, nombre: miembro.nombre, rut: miembro.rut });
-    } else if (cargo === "tesorero") {
-      firmantes.push({
-        cargo: "tesorero",
-        nombre: TESORERO_NOMBRE,
-        rut: TESORERO_RUT,
-      });
-    }
-  }
+  const firmantes = await resolverFirmantes(cargosPedidos, directivaActiva, {
+    nombre: TESORERO_NOMBRE,
+    rut: TESORERO_RUT,
+  });
 
   const fechaLarga = formatFechaLarga(fecha);
   const hoy = formatFechaLarga(new Date());
@@ -206,32 +196,14 @@ export default async function ImprimirCertificadoPage({
         {/* Firmas */}
         {firmantes.length === 1 ? (
           <div className="mt-20 flex justify-center text-[12px]">
-            <div className="w-72 text-center">
-              <div className="mb-1 border-t border-slate-800" />
-              <div className="font-bold uppercase">
-                {DIRECTIVA_CARGO_LABEL[firmantes[0].cargo]}
-              </div>
-              <div className="mt-1">{firmantes[0].nombre}</div>
-              <div>
-                RUT: {firmantes[0].rut?.trim() || "__________________________"}
-              </div>
-              <div>{INSTITUCION_NOMBRE}</div>
+            <div className="w-72">
+              <FirmaCargoBlock f={firmantes[0]} />
             </div>
           </div>
         ) : (
           <div className="mt-20 grid grid-cols-2 gap-8 text-[12px]">
             {firmantes.map((f) => (
-              <div key={f.cargo} className="text-center">
-                <div className="mb-1 border-t border-slate-800" />
-                <div className="font-bold uppercase">
-                  {DIRECTIVA_CARGO_LABEL[f.cargo]}
-                </div>
-                <div className="mt-1">{f.nombre}</div>
-                <div>
-                  RUT: {f.rut?.trim() || "__________________________"}
-                </div>
-                <div>{INSTITUCION_NOMBRE}</div>
-              </div>
+              <FirmaCargoBlock key={f.cargo} f={f} />
             ))}
           </div>
         )}
@@ -242,5 +214,29 @@ export default async function ImprimirCertificadoPage({
         </footer>
       </div>
     </>
+  );
+}
+
+function FirmaCargoBlock({ f }: { f: FirmanteConFirma }) {
+  return (
+    <div className="text-center">
+      <div className="h-14 print:h-16 flex items-end justify-center overflow-hidden">
+        {f.firmaUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={f.firmaUrl}
+            alt={`Firma ${f.nombre}`}
+            className="max-h-full max-w-[180px] object-contain"
+          />
+        )}
+      </div>
+      <div className="border-t border-slate-800" />
+      <div className="font-bold uppercase mt-1">
+        {DIRECTIVA_CARGO_LABEL[f.cargo]}
+      </div>
+      <div className="mt-1">{f.nombre}</div>
+      <div>RUT: {f.rut?.trim() || "__________________________"}</div>
+      <div>{INSTITUCION_NOMBRE}</div>
+    </div>
   );
 }
