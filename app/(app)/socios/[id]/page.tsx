@@ -8,6 +8,7 @@ import {
   type SocioSolicitud,
 } from "@/lib/types";
 import { AccionesSolicitud } from "./acciones";
+import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
 
 type CuentaRow = { id: string; nombre: string; es_principal: boolean };
 
@@ -50,9 +51,14 @@ export default async function SolicitudDetallePage({
   const cuentas = (cuentasData as CuentaRow[] | null) ?? [];
 
   // URL publica del QR (lo que codifica el QR en si).
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://tesoria-cpcc.vercel.app";
-  const urlPublica = `${siteUrl}/socio/${s.qr_token}`;
+  const urlPublica = urlPublicaSocio(s.qr_token);
+
+  // Generar QR como data URL si la solicitud esta en estado valido.
+  const puedeVerQr =
+    s.estado === "pagada" || s.estado === "enviada";
+  const qrDataUrl = puedeVerQr
+    ? await generarQrDataUrl(urlPublica, { size: 400 })
+    : null;
 
   return (
     <div className="max-w-3xl space-y-4">
@@ -219,26 +225,53 @@ export default async function SolicitudDetallePage({
         </div>
       )}
 
-      {/* URL publica del QR */}
+      {/* QR + URL publica */}
       <div className="card">
-        <h2 className="font-semibold mb-2">URL pública del QR</h2>
-        <p className="text-xs text-slate-500 mb-2">
-          Esto es lo que codifica el QR. Al escanearlo con la cámara se abre
-          la página de verificación pública.
-        </p>
-        <div className="bg-slate-50 border border-slate-200 rounded-md p-2 font-mono text-xs break-all">
-          {urlPublica}
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Link
-            href={`/socio/${s.qr_token}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary text-xs"
-          >
-            Ver página pública ↗
-          </Link>
-        </div>
+        <h2 className="font-semibold mb-2">Código QR del socio</h2>
+        {qrDataUrl ? (
+          <div className="flex flex-wrap gap-4 items-start">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={qrDataUrl}
+              alt="Código QR del socio"
+              className="w-48 h-48 bg-white p-2 border border-slate-200 rounded-md flex-shrink-0"
+            />
+            <div className="flex-1 min-w-[200px] space-y-2 text-xs">
+              <p className="text-slate-600">
+                Puedes compartir este QR o la URL pública con el apoderado
+                mientras no esté configurado el envío por correo.
+              </p>
+              <div className="font-mono bg-slate-50 border border-slate-200 rounded-md p-2 break-all">
+                {urlPublica}
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <a
+                  href={qrDataUrl}
+                  download={`qr-socio-${s.apoderado_nombre.replace(/\s+/g, "-")}.png`}
+                  className="btn-secondary text-xs"
+                >
+                  ⬇ Descargar QR
+                </a>
+                <Link
+                  href={`/socio/${s.qr_token}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-secondary text-xs"
+                >
+                  Ver página pública ↗
+                </Link>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm bg-amber-50 border border-amber-200 rounded-md p-3 text-amber-900">
+            El QR aún no está disponible: la solicitud debe estar en estado{" "}
+            <strong>pagada</strong> para generarlo. Registra el pago primero.
+            <div className="font-mono text-xs mt-2 bg-slate-50 border border-slate-200 rounded-md p-2 break-all">
+              URL que codificará el QR: {urlPublica}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Notas internas */}

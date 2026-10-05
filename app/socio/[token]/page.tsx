@@ -7,6 +7,7 @@ import type {
 } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
 import { AppFooter } from "@/components/app-footer";
+import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
 
 export const metadata = { title: "Verificación de socio — CPCC" };
 export const dynamic = "force-dynamic";
@@ -54,20 +55,25 @@ export default async function SocioPublicoPage({
   const antesDeInicio =
     !!config?.periodo_inicio && hoy < config.periodo_inicio;
   const despuesDeFin = !!config?.periodo_fin && hoy > config.periodo_fin;
-  const activo =
+  // El QR es valido si la cuota ya se pago (pagada) o el correo ya se
+  // envio (enviada). El envio de correo es opcional (requiere Resend) y
+  // no debe bloquear la validez de la membresia.
+  const pagada =
     !!solicitud &&
-    solicitud.estado === "enviada" &&
-    solicitud.periodo_anio === periodoVigente &&
+    (solicitud.estado === "pagada" || solicitud.estado === "enviada");
+  const activo =
+    pagada &&
+    solicitud!.periodo_anio === periodoVigente &&
     !antesDeInicio &&
     !despuesDeFin;
 
   // Posibles estados "no activo" para dar mensaje mas util
   const motivoRechazo = !solicitud
     ? "Este QR no corresponde a ningún socio registrado."
+    : solicitud.estado === "pendiente_match"
+    ? "La inscripción está pendiente de verificación por la directiva."
     : solicitud.estado === "pendiente_pago"
     ? "Este socio aún no completa el pago de su cuota."
-    : solicitud.estado === "pagada"
-    ? "El pago está confirmado pero aún no se ha emitido el QR definitivo. Intenta de nuevo en unos minutos."
     : solicitud.estado === "rechazada" || solicitud.estado === "anulada"
     ? "Esta inscripción fue dada de baja."
     : solicitud.periodo_anio !== periodoVigente
@@ -77,6 +83,12 @@ export default async function SocioPublicoPage({
     : despuesDeFin
     ? `Este QR expiró el ${config!.periodo_fin}. El período ${periodoVigente} ya finalizó.`
     : "QR no vigente.";
+
+  // Generar QR como data URL para mostrar en la pagina publica
+  // (lo que escanea el validador PWA es la URL de esta pagina misma).
+  const qrDataUrl = activo
+    ? await generarQrDataUrl(urlPublicaSocio(token), { size: 500 })
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -100,10 +112,27 @@ export default async function SocioPublicoPage({
 
         {activo && solicitud ? (
           <div className="card border-2 border-green-500 bg-green-50 text-center space-y-3">
-            <div className="text-6xl">✅</div>
+            <div className="text-5xl">✅</div>
             <div className="text-xl font-bold text-green-900">
               Socio activo {solicitud.periodo_anio}
             </div>
+
+            {/* QR grande para que el apoderado muestre desde el celular */}
+            {qrDataUrl && (
+              <div className="pt-3 border-t border-green-200">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qrDataUrl}
+                  alt="Código QR del socio"
+                  className="mx-auto w-64 h-64 bg-white p-2 rounded-md border border-green-200"
+                />
+                <p className="text-xs text-slate-500 mt-2">
+                  Muestra este código al verificador o descárgalo con click
+                  derecho &gt; Guardar imagen.
+                </p>
+              </div>
+            )}
+
             <div className="pt-3 border-t border-green-200 space-y-2 text-sm text-slate-800">
               <div>
                 <span className="text-xs uppercase text-slate-500">

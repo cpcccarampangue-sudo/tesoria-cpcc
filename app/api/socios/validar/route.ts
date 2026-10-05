@@ -68,11 +68,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (solicitud.estado !== "enviada") {
+  // El QR es valido una vez que el pago esta confirmado (estados
+  // "pagada" o "enviada"). El envio de correo es opcional y no debe
+  // bloquear la validez de la membresia.
+  if (solicitud.estado !== "pagada" && solicitud.estado !== "enviada") {
     return NextResponse.json({
       estado: "no_valido",
-      motivo:
-        "El pago está confirmado pero aún no se emitió el QR definitivo. Intenta en unos minutos.",
+      motivo: "Esta inscripción no está activa.",
     });
   }
 
