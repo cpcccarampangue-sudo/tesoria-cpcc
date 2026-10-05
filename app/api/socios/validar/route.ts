@@ -76,6 +76,22 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Validacion por fecha: si el periodo tiene inicio/fin configurados,
+  // el QR solo es valido entre esas fechas.
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (config?.periodo_inicio && hoy < config.periodo_inicio) {
+    return NextResponse.json({
+      estado: "no_valido",
+      motivo: `El período ${periodoVigente} empieza el ${config.periodo_inicio}.`,
+    });
+  }
+  if (config?.periodo_fin && hoy > config.periodo_fin) {
+    return NextResponse.json({
+      estado: "no_valido",
+      motivo: `Este QR expiró el ${config.periodo_fin}.`,
+    });
+  }
+
   // Cargar hijos de la familia linkeada, si aplica.
   let hijos: Array<{ nombre: string; curso: string | null }> = [];
   if (solicitud.apoderado_id) {

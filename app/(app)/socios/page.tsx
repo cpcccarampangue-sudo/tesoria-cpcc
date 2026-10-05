@@ -114,7 +114,17 @@ export default async function SociosPage({
                 Período activo: {config.periodo_anio}
               </h2>
               <p className="text-xs text-slate-500">
-                Monto cuota:{" "}
+                Validez:{" "}
+                {config.periodo_inicio && config.periodo_fin ? (
+                  <strong>
+                    {config.periodo_inicio} → {config.periodo_fin}
+                  </strong>
+                ) : (
+                  <span className="text-amber-700 font-medium">
+                    sin fechas configuradas
+                  </span>
+                )}{" "}
+                · Monto cuota:{" "}
                 <strong>
                   ${config.monto_cuota.toLocaleString("es-CL")} CLP
                 </strong>{" "}

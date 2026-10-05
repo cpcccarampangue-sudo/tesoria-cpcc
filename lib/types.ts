@@ -297,6 +297,8 @@ export type CuotaEstadoApoderado = {
 export type SocioConfig = {
   id: number;
   periodo_anio: number;
+  periodo_inicio: string | null; // "YYYY-MM-DD"
+  periodo_fin: string | null; // "YYYY-MM-DD"
   monto_cuota: number;
   sumup_link: string | null;
   sumup_checkout_fijo: boolean;

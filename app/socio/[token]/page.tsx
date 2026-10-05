@@ -48,11 +48,18 @@ export default async function SocioPublicoPage({
   //  - La solicitud existe
   //  - Estado es "enviada" (QR ya emitido)
   //  - El periodo coincide con el periodo vigente de la config
+  //  - La fecha de hoy esta entre periodo_inicio y periodo_fin (si configurados)
   const periodoVigente = config?.periodo_anio ?? new Date().getFullYear();
+  const hoy = new Date().toISOString().slice(0, 10);
+  const antesDeInicio =
+    !!config?.periodo_inicio && hoy < config.periodo_inicio;
+  const despuesDeFin = !!config?.periodo_fin && hoy > config.periodo_fin;
   const activo =
     !!solicitud &&
     solicitud.estado === "enviada" &&
-    solicitud.periodo_anio === periodoVigente;
+    solicitud.periodo_anio === periodoVigente &&
+    !antesDeInicio &&
+    !despuesDeFin;
 
   // Posibles estados "no activo" para dar mensaje mas util
   const motivoRechazo = !solicitud
@@ -65,6 +72,10 @@ export default async function SocioPublicoPage({
     ? "Esta inscripción fue dada de baja."
     : solicitud.periodo_anio !== periodoVigente
     ? `Este QR corresponde al periodo ${solicitud.periodo_anio} y ya no está vigente. El periodo activo es ${periodoVigente}.`
+    : antesDeInicio
+    ? `El período ${periodoVigente} empieza el ${config!.periodo_inicio}. Vuelve a escanear a partir de esa fecha.`
+    : despuesDeFin
+    ? `Este QR expiró el ${config!.periodo_fin}. El período ${periodoVigente} ya finalizó.`
     : "QR no vigente.";
 
   return (

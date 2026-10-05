@@ -8,6 +8,8 @@ import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 // Config
 export type ActualizarConfigInput = {
   periodo_anio: number;
+  periodo_inicio: string | null; // "YYYY-MM-DD"
+  periodo_fin: string | null;
   monto_cuota: number;
   sumup_link: string | null;
   mensaje_bienvenida: string | null;
@@ -15,11 +17,21 @@ export type ActualizarConfigInput = {
 
 export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   await requireDirectiva();
+  // Validacion: si vienen las dos fechas, inicio debe ser antes que fin.
+  if (input.periodo_inicio && input.periodo_fin) {
+    if (input.periodo_inicio > input.periodo_fin) {
+      throw new Error(
+        "La fecha de inicio del periodo debe ser anterior a la fecha de fin."
+      );
+    }
+  }
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("socio_config")
     .update({
       periodo_anio: input.periodo_anio,
+      periodo_inicio: input.periodo_inicio,
+      periodo_fin: input.periodo_fin,
       monto_cuota: input.monto_cuota,
       sumup_link: input.sumup_link,
       mensaje_bienvenida: input.mensaje_bienvenida,

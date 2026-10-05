@@ -18,6 +18,8 @@ export default async function SocioConfigPage() {
   const config = (data as SocioConfig | null) ?? {
     id: 1,
     periodo_anio: new Date().getFullYear(),
+    periodo_inicio: null,
+    periodo_fin: null,
     monto_cuota: 20000,
     sumup_link: null,
     sumup_checkout_fijo: false,
