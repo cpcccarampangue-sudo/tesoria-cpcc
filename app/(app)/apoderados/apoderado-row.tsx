@@ -67,6 +67,9 @@ export function ApoderadoRow({
                   {RELACION_LABELS[c.relacion]}:
                 </span>{" "}
                 <span className="font-medium">{c.nombre}</span>
+                {c.rut && (
+                  <span className="text-slate-500 font-mono"> · {c.rut}</span>
+                )}
                 {c.email && (
                   <span className="text-slate-500"> · {c.email}</span>
                 )}

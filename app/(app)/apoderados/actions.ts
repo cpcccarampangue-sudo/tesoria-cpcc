@@ -16,6 +16,7 @@ export type EstudianteInput = {
 export type ContactoInput = {
   id?: string;
   nombre: string;
+  rut: string | null;
   email: string | null;
   telefono: string | null;
   relacion: ContactoRelacion;
@@ -47,12 +48,28 @@ function normalizarEstudiantes(raw: EstudianteInput[] | undefined) {
     .filter((e) => e.nombre.length > 0);
 }
 
+// Normaliza un RUT chileno: deja solo numeros y K, agrega guion antes del
+// digito verificador, puntos de miles. Si no se puede parsear, devuelve
+// el texto tal cual (sin romper).
+function cleanRut(v: string | null | undefined): string | null {
+  const raw = (v ?? "").trim();
+  if (!raw) return null;
+  const clean = raw.replace(/[^0-9kK]/g, "").toUpperCase();
+  if (clean.length < 2) return raw; // deja tal cual lo que vino
+  const cuerpo = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  // Agregar puntos de miles al cuerpo
+  const conPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${conPuntos}-${dv}`;
+}
+
 function normalizarContactos(raw: ContactoInput[] | undefined) {
   if (!raw) return [];
   return raw
     .map((c) => ({
       id: c.id,
       nombre: c.nombre.trim(),
+      rut: cleanRut(c.rut),
       email: cleanEmail(c.email),
       telefono: c.telefono?.trim() || null,
       relacion: c.relacion ?? "otro",
@@ -80,6 +97,7 @@ export async function crearApoderado(input: ApoderadoInput) {
       contactos.map((c) => ({
         apoderado_id: data.id,
         nombre: c.nombre,
+        rut: c.rut,
         email: c.email,
         telefono: c.telefono,
         relacion: c.relacion,
@@ -156,6 +174,7 @@ export async function actualizarApoderado(id: string, input: ApoderadoInput) {
   const contactos = normalizarContactos(input.contactos);
   await syncChildren(supabase, "contactos", id, contactos, (c) => ({
     nombre: c.nombre,
+    rut: c.rut,
     email: c.email,
     telefono: c.telefono,
     relacion: c.relacion,
@@ -310,10 +329,11 @@ type ImportResult = {
 
 // CSV esperado (encabezado obligatorio, cualquier orden):
 //   nombre                   → rótulo de familia (obligatorio)
-//   contactos                → "Nombre:email:telefono:relacion; Nombre:email:tel:rel"
-//                              relacion en {padre, madre, tutor, otro}
+//   contactos                → "Nombre:email:telefono:relacion:rut; Nombre:email:tel:rel:rut"
+//                              relacion en {padre, madre, apoderado_cuenta, apoderado_academico, otro}
+//                              rut es opcional (si solo hay 4 tokens, rut queda vacio)
 //   estudiantes              → "Nombre:Curso; Nombre:Curso"
-// Legacy soportado: email, telefono, nombre_estudiante, curso (se importan como
+// Legacy soportado: email, telefono, rut, nombre_estudiante, curso (se importan como
 // primer contacto + primer estudiante).
 export async function importarApoderadosCSV(
   csvText: string
@@ -355,6 +375,7 @@ export async function importarApoderadosCSV(
     // Parse contactos
     let contactos: {
       nombre: string;
+      rut: string | null;
       email: string | null;
       telefono: string | null;
       relacion: ContactoRelacion;
@@ -364,7 +385,9 @@ export async function importarApoderadosCSV(
       contactos = ctxCol
         .split(";")
         .map((chunk) => {
-          const [n, em, tel, rel] = chunk.split(":").map((s) => s.trim());
+          const [n, em, tel, rel, rut] = chunk
+            .split(":")
+            .map((s) => s.trim());
           if (!n) return null;
           const valid: ContactoRelacion[] = [
             "padre",
@@ -380,6 +403,7 @@ export async function importarApoderadosCSV(
             : "otro";
           return {
             nombre: n,
+            rut: cleanRut(rut),
             email: cleanEmail(em),
             telefono: tel || null,
             relacion,
@@ -390,19 +414,22 @@ export async function importarApoderadosCSV(
             x
           ): x is {
             nombre: string;
+            rut: string | null;
             email: string | null;
             telefono: string | null;
             relacion: ContactoRelacion;
           } => !!x
         );
     } else {
-      // Legacy: usa email + telefono + nombre del apoderado
+      // Legacy: usa email + telefono + rut + nombre del apoderado
       const em = cleanEmail(r.email);
       const tel = (r.telefono ?? "").trim() || null;
-      if (em || tel) {
+      const rt = cleanRut(r.rut);
+      if (em || tel || rt) {
         contactos = [
           {
             nombre,
+            rut: rt,
             email: em,
             telefono: tel,
             relacion: "otro",
@@ -477,6 +504,7 @@ export async function importarApoderadosCSV(
           contactos.map((c) => ({
             apoderado_id: apoderadoId,
             nombre: c.nombre,
+            rut: c.rut,
             email: c.email,
             telefono: c.telefono,
             relacion: c.relacion,

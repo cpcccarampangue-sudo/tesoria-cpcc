@@ -54,6 +54,19 @@ function cleanEmail(v: string): string | null {
   return t;
 }
 
+// Normaliza RUT chileno: deja solo numeros y K, formatea con puntos y
+// guion. Si no es parseable, devuelve el raw sin cambios.
+function cleanRut(v: string | null | undefined): string | null {
+  const raw = (v ?? "").trim();
+  if (!raw) return null;
+  const clean = raw.replace(/[^0-9kK]/g, "").toUpperCase();
+  if (clean.length < 2) return raw;
+  const cuerpo = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  const conPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${conPuntos}-${dv}`;
+}
+
 function parseFecha(v: string): string | null {
   const t = v.trim();
   if (!t) return null;
@@ -309,6 +322,7 @@ async function runImportFromBytes(
 
   type ContactoTmp = {
     nombre: string;
+    rut: string | null;
     email: string | null;
     telefono: string | null;
     relacion: ContactoRelacion;
@@ -387,6 +401,9 @@ async function runImportFromBytes(
     );
     const padreEmail = cleanEmail(get(row, cols, "[Padre]eMail", "[Padre]email"));
     const padreTel = get(row, cols, "[Padre]celular", "[Padre]telefono") || null;
+    const padreRut = cleanRut(
+      get(row, cols, "[Padre]rut", "[Padre]Rut", "[Padre]RUT")
+    );
 
     // Madre
     const madreNombre = buildNombre(
@@ -396,18 +413,26 @@ async function runImportFromBytes(
     );
     const madreEmail = cleanEmail(get(row, cols, "[Madre]eMail", "[Madre]email"));
     const madreTel = get(row, cols, "[Madre]celular", "[Madre]telefono") || null;
+    const madreRut = cleanRut(
+      get(row, cols, "[Madre]rut", "[Madre]Rut", "[Madre]RUT")
+    );
 
     if (padreNombre) {
       const key = padreEmail ?? `noemail:padre`;
       if (!fam.contactos.has(key)) {
         fam.contactos.set(key, {
           nombre: padreNombre,
+          rut: padreRut,
           email: padreEmail,
           telefono: padreTel,
           relacion: "padre",
           esApCuenta: false,
           esApAcademico: false,
         });
+      } else {
+        // Si ya existe pero no tenia RUT, lo llenamos.
+        const existente = fam.contactos.get(key)!;
+        if (!existente.rut && padreRut) existente.rut = padreRut;
       }
     }
     if (madreNombre) {
@@ -415,12 +440,16 @@ async function runImportFromBytes(
       if (!fam.contactos.has(key)) {
         fam.contactos.set(key, {
           nombre: madreNombre,
+          rut: madreRut,
           email: madreEmail,
           telefono: madreTel,
           relacion: "madre",
           esApCuenta: false,
           esApAcademico: false,
         });
+      } else {
+        const existente = fam.contactos.get(key)!;
+        if (!existente.rut && madreRut) existente.rut = madreRut;
       }
     }
 
@@ -579,6 +608,7 @@ async function runImportFromBytes(
       contactosBulk.push({
         apoderado_id: fid,
         nombre: c.nombre,
+        rut: c.rut,
         email,
         telefono: c.telefono,
         relacion: c.relacion,

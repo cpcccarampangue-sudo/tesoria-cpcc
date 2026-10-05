@@ -33,6 +33,7 @@ export function EditarApoderadoForm({
     contactos.map((c) => ({
       id: c.id,
       nombre: c.nombre,
+      rut: c.rut,
       email: c.email,
       telefono: c.telefono,
       relacion: c.relacion,

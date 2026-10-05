@@ -31,7 +31,13 @@ export function ContactosEditor({
     (value.length > 0
       ? value
       : ([
-          { nombre: "", email: null, telefono: null, relacion: "padre" },
+          {
+            nombre: "",
+            rut: null,
+            email: null,
+            telefono: null,
+            relacion: "padre",
+          },
         ] as ContactoInput[])
     ).map((c) => ({ ...c, _key: newKey() }))
   );
@@ -42,6 +48,7 @@ export function ContactosEditor({
       next.map((it) => ({
         id: it.id,
         nombre: it.nombre,
+        rut: it.rut,
         email: it.email,
         telefono: it.telefono,
         relacion: it.relacion,
@@ -59,6 +66,7 @@ export function ContactosEditor({
       {
         _key: newKey(),
         nombre: "",
+        rut: null,
         email: null,
         telefono: null,
         relacion: "madre",
@@ -75,6 +83,7 @@ export function ContactosEditor({
             {
               _key: newKey(),
               nombre: "",
+              rut: null,
               email: null,
               telefono: null,
               relacion: "padre",
@@ -112,13 +121,21 @@ export function ContactosEditor({
               Quitar
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               className="input"
               value={it.nombre}
               onChange={(e) => update(i, { nombre: e.target.value })}
               placeholder="Nombre completo"
             />
+            <input
+              className="input"
+              value={it.rut ?? ""}
+              onChange={(e) => update(i, { rut: e.target.value || null })}
+              placeholder="RUT (ej. 12.345.678-9)"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input
               className="input"
               type="email"
