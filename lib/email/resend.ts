@@ -17,12 +17,16 @@ function client(): Resend {
     const key = process.env.RESEND_API_KEY;
     if (!key) {
       throw new Error(
-        "RESEND_API_KEY no esta configurada. Define la env var en Vercel."
+        "El envío de correo no está configurado todavía (falta RESEND_API_KEY en Vercel). Mientras tanto, comparte el link público del QR manualmente con el apoderado."
       );
     }
     _client = new Resend(key);
   }
   return _client;
+}
+
+export function resendHabilitado(): boolean {
+  return !!process.env.RESEND_API_KEY;
 }
 
 function from(): string {
