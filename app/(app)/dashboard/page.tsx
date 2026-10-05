@@ -272,8 +272,8 @@ async function DirectivaPanel() {
             <Link href="/eventos/nuevo" className="btn-secondary text-xs">
               + Nuevo evento
             </Link>
-            <Link href="/cuotas" className="btn-secondary text-xs">
-              Cobrar cuotas
+            <Link href="/socios/nuevo" className="btn-secondary text-xs">
+              💵 Incorporar socio
             </Link>
           </div>
         </div>
