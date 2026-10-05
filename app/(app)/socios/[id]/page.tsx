@@ -13,6 +13,7 @@ export const metadata = { title: "Solicitud de socio — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
 const ESTADO_BADGE: Record<SocioEstado, string> = {
+  pendiente_match: "badge-amber",
   pendiente_pago: "badge-amber",
   pagada: "badge-blue",
   enviada: "badge-green",

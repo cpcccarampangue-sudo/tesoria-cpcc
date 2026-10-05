@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 const ESTADOS_FILTRO: Array<{ value: string; label: string }> = [
   { value: "todas", label: "Todas" },
+  { value: "pendiente_match", label: "Pendientes de identificar" },
   { value: "pendiente_pago", label: "Pendientes de pago" },
   { value: "pagada", label: "Pagadas (sin QR enviado)" },
   { value: "enviada", label: "Con QR enviado" },
@@ -21,6 +22,7 @@ const ESTADOS_FILTRO: Array<{ value: string; label: string }> = [
 ];
 
 const ESTADO_BADGE: Record<SocioEstado, string> = {
+  pendiente_match: "badge-amber",
   pendiente_pago: "badge-amber",
   pagada: "badge-blue",
   enviada: "badge-green",

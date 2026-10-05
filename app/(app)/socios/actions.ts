@@ -112,6 +112,78 @@ export async function rechazarSolicitud(id: string, notas?: string) {
   revalidatePath(`/socios/${id}`);
 }
 
+// Vincula una solicitud 'pendiente_match' (creada por el flujo manual del
+// formulario publico) con una familia existente. Cambia estado a
+// pendiente_pago para que siga el flujo normal (pagar o marcar pagada).
+export async function vincularSolicitudConApoderado(
+  solicitudId: string,
+  apoderadoId: string
+) {
+  await requireDirectiva();
+  const supabase = await createSupabaseServerClient();
+  // Validar que el apoderado existe
+  const { data: apoderadoData } = await supabase
+    .from("apoderados")
+    .select("id, nombre")
+    .eq("id", apoderadoId)
+    .maybeSingle();
+  if (!apoderadoData) throw new Error("Familia no encontrada.");
+
+  const { error } = await supabase
+    .from("socio_solicitudes")
+    .update({
+      apoderado_id: apoderadoId,
+      // Si el nombre que escribio el apoderado no coincide con el de la
+      // familia, dejamos el "oficial" (el del listado del colegio).
+      apoderado_nombre: (apoderadoData as { nombre: string }).nombre,
+      estado: "pendiente_pago",
+    })
+    .eq("id", solicitudId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/socios");
+  revalidatePath(`/socios/${solicitudId}`);
+}
+
+// Busqueda rapida de apoderados por nombre, para el selector de
+// "vincular familia" en el admin.
+export async function buscarApoderadosAdmin(
+  q: string
+): Promise<Array<{ id: string; nombre: string; emails: string }>> {
+  await requireDirectiva();
+  const supabase = await createSupabaseServerClient();
+  const trimmed = q.trim();
+  if (!trimmed || trimmed.length < 2) return [];
+  const { data: apoderadosData } = await supabase
+    .from("apoderados")
+    .select("id, nombre")
+    .ilike("nombre", `%${trimmed}%`)
+    .order("nombre")
+    .limit(20);
+  const apoderados =
+    (apoderadosData as Array<{ id: string; nombre: string }> | null) ?? [];
+  if (apoderados.length === 0) return [];
+  const ids = apoderados.map((a) => a.id);
+  const { data: contactosData } = await supabase
+    .from("contactos")
+    .select("apoderado_id, email")
+    .in("apoderado_id", ids);
+  const emailsPorApoderado = new Map<string, string[]>();
+  for (const c of (contactosData ?? []) as Array<{
+    apoderado_id: string;
+    email: string | null;
+  }>) {
+    if (!c.email) continue;
+    const arr = emailsPorApoderado.get(c.apoderado_id) ?? [];
+    arr.push(c.email);
+    emailsPorApoderado.set(c.apoderado_id, arr);
+  }
+  return apoderados.map((a) => ({
+    id: a.id,
+    nombre: a.nombre,
+    emails: (emailsPorApoderado.get(a.id) ?? []).join(", "),
+  }));
+}
+
 export async function anularSolicitud(id: string) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();

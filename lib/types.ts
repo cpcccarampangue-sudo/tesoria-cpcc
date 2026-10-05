@@ -33,6 +33,7 @@ export type Contacto = {
   id: string;
   apoderado_id: string;
   nombre: string;
+  rut: string | null;
   email: string | null;
   telefono: string | null;
   relacion: ContactoRelacion;
@@ -307,6 +308,7 @@ export type SocioConfig = {
 };
 
 export type SocioEstado =
+  | "pendiente_match"
   | "pendiente_pago"
   | "pagada"
   | "enviada"
@@ -314,6 +316,7 @@ export type SocioEstado =
   | "anulada";
 
 export const SOCIO_ESTADO_LABEL: Record<SocioEstado, string> = {
+  pendiente_match: "Pendiente de identificar",
   pendiente_pago: "Pendiente de pago",
   pagada: "Pagada",
   enviada: "QR enviado",

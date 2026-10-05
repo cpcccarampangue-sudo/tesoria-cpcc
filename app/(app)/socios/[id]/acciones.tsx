@@ -9,6 +9,7 @@ import {
   anularSolicitud,
   registrarReenvioEmail,
 } from "../actions";
+import { VincularFamilia } from "./vincular-familia";
 
 export function AccionesSolicitud({
   solicitud: s,
@@ -36,6 +37,18 @@ export function AccionesSolicitud({
 
   return (
     <div className="space-y-3 text-sm">
+      {s.estado === "pendiente_match" && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-3">
+          <div className="text-sm text-amber-900">
+            <strong>Pendiente de identificar.</strong> El apoderado llenó el
+            formulario manualmente porque no se encontró en el listado del
+            colegio. Vincula esta solicitud con la familia correcta para
+            continuar.
+          </div>
+          <VincularFamilia solicitudId={s.id} />
+        </div>
+      )}
+
       {s.estado === "pendiente_pago" && (
         <div className="flex flex-wrap gap-2">
           <button
