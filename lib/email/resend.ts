@@ -66,6 +66,28 @@ export async function enviarCorreo(input: EnviarCorreoInput): Promise<void> {
   };
   const { error } = await c.emails.send(payload);
   if (error) {
-    throw new Error(`Error enviando correo: ${error.message}`);
+    // Mensajes claros para los errores mas comunes de Resend.
+    const msg = error.message ?? "";
+    const nombre = (error as unknown as { name?: string }).name ?? "";
+
+    // Sandbox: con onboarding@resend.dev solo se puede enviar al email
+    // registrado en la cuenta de Resend.
+    if (
+      msg.includes("You can only send testing emails") ||
+      msg.includes("verified") ||
+      nombre === "validation_error"
+    ) {
+      throw new Error(
+        `Resend rechazó el envío a "${input.to}". Con el remitente de prueba ("onboarding@resend.dev") solo se puede enviar al correo que creó la cuenta Resend (cpcc.carampangue@gmail.com). Para enviar a otros apoderados, verifica tu dominio en Resend y cambia RESEND_FROM en Vercel.`
+      );
+    }
+
+    if (msg.toLowerCase().includes("api key") || nombre === "unauthorized") {
+      throw new Error(
+        `La API key de Resend no es válida o no tiene permisos. Revisa RESEND_API_KEY en Vercel.`
+      );
+    }
+
+    throw new Error(`Resend: ${msg || "error desconocido"}`);
   }
 }
