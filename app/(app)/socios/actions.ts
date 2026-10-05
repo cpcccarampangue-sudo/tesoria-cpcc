@@ -12,6 +12,8 @@ export type ActualizarConfigInput = {
   periodo_fin: string | null;
   monto_cuota: number;
   sumup_link: string | null;
+  cuenta_sumup_id: string | null;
+  categoria_cuota_id: string | null;
   mensaje_bienvenida: string | null;
 };
 
@@ -34,6 +36,8 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
       periodo_fin: input.periodo_fin,
       monto_cuota: input.monto_cuota,
       sumup_link: input.sumup_link,
+      cuenta_sumup_id: input.cuenta_sumup_id,
+      categoria_cuota_id: input.categoria_cuota_id,
       mensaje_bienvenida: input.mensaje_bienvenida,
       updated_at: new Date().toISOString(),
     })

@@ -7,14 +7,29 @@ import { ConfigForm } from "./config-form";
 export const metadata = { title: "Configuración de socios — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
+type CuentaOp = { id: string; nombre: string; es_principal: boolean };
+type CategoriaOp = { id: string; nombre: string };
+
 export default async function SocioConfigPage() {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
-  const { data } = await supabase
-    .from("socio_config")
-    .select("*")
-    .eq("id", 1)
-    .maybeSingle();
+  const [{ data }, { data: cuentasData }, { data: categoriasData }] =
+    await Promise.all([
+      supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
+      supabase
+        .from("cuentas")
+        .select("id, nombre, es_principal")
+        .eq("activa", true)
+        .order("orden")
+        .order("nombre"),
+      supabase
+        .from("categorias")
+        .select("id, nombre")
+        .eq("activa", true)
+        .eq("tipo", "ingreso")
+        .order("nombre"),
+    ]);
+
   const config = (data as SocioConfig | null) ?? {
     id: 1,
     periodo_anio: new Date().getFullYear(),
@@ -28,6 +43,8 @@ export default async function SocioConfigPage() {
     mensaje_bienvenida: null,
     updated_at: new Date().toISOString(),
   };
+  const cuentas = (cuentasData as CuentaOp[] | null) ?? [];
+  const categorias = (categoriasData as CategoriaOp[] | null) ?? [];
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -47,7 +64,11 @@ export default async function SocioConfigPage() {
         </p>
       </div>
       <div className="card">
-        <ConfigForm config={config} />
+        <ConfigForm
+          config={config}
+          cuentas={cuentas}
+          categorias={categorias}
+        />
       </div>
     </div>
   );

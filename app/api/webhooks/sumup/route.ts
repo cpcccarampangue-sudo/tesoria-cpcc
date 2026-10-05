@@ -129,6 +129,43 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Crear movimiento en el libro de caja si la config lo permite.
+  // Si cuenta_sumup_id esta configurada, el pago aparece como ingreso
+  // en esa cuenta con la categoria "Cuota socio CdP".
+  let movimientoId: string | null = null;
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("cuenta_sumup_id, categoria_cuota_id")
+    .eq("id", 1)
+    .maybeSingle();
+  const cfg = cfgData as {
+    cuenta_sumup_id: string | null;
+    categoria_cuota_id: string | null;
+  } | null;
+  if (cfg?.cuenta_sumup_id) {
+    const descripcion = `Cuota socio CdP ${solicitud.periodo_anio} — ${solicitud.apoderado_nombre} (SumUp)`;
+    const { data: movData, error: movErr } = await supabase
+      .from("movimientos")
+      .insert({
+        fecha: new Date().toISOString().slice(0, 10),
+        tipo: "ingreso",
+        monto: solicitud.monto_cuota,
+        descripcion,
+        categoria_id: cfg.categoria_cuota_id,
+        cuenta_id: cfg.cuenta_sumup_id,
+      })
+      .select("id")
+      .single();
+    if (movErr) {
+      console.error(
+        "[webhook SumUp] Error creando movimiento:",
+        movErr.message
+      );
+    } else {
+      movimientoId = movData.id as string;
+    }
+  }
+
   // Marcar como pagada
   const { error: updErr } = await supabase
     .from("socio_solicitudes")
@@ -137,6 +174,7 @@ export async function POST(req: NextRequest) {
       pagada_en: new Date().toISOString(),
       sumup_transaction_id: event.payload?.transaction_id ?? null,
       sumup_transaction_code: event.payload?.transaction_code ?? null,
+      movimiento_id: movimientoId,
     })
     .eq("id", solicitud.id);
   if (updErr) {
@@ -155,7 +193,7 @@ export async function POST(req: NextRequest) {
     console.error("Error enviando correo QR tras webhook SumUp:", err);
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, movimiento_id: movimientoId });
 }
 
 // SumUp a veces hace un GET al endpoint para verificar que existe antes
