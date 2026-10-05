@@ -31,5 +31,25 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
     ],
+    // Accesos directos para delegados/directiva/convenios que solo
+    // quieren validar QRs (no entrar al sistema de tesoreria).
+    shortcuts: [
+      {
+        name: "Validar QR de socio",
+        short_name: "Validar",
+        description:
+          "Escanea el QR de un apoderado y verifica si es socio activo del año en curso.",
+        url: "/validar",
+        icons: [{ src: "/icon-192.png", sizes: "192x192" }],
+      },
+      {
+        name: "Incorporarse como socio",
+        short_name: "Incorporarse",
+        description:
+          "Formulario público para registrarse como socio del CdP.",
+        url: "/incorporacion",
+        icons: [{ src: "/icon-192.png", sizes: "192x192" }],
+      },
+    ],
   };
 }

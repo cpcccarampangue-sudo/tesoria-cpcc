@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 
 // Config
 export type ActualizarConfigInput = {
@@ -90,26 +91,12 @@ export async function anularSolicitud(id: string) {
   revalidatePath(`/socios/${id}`);
 }
 
-// Incrementa contador y actualiza timestamp de reenvio. El envio real del
-// correo lo hace la integracion con Resend (TODO fase 2).
+// Genera el QR del socio y lo envia por correo via Resend. Actualiza
+// estado a "enviada" y, si es un reenvio, incrementa el contador. Se usa
+// desde el panel admin para "enviar QR" o "reenviar QR".
 export async function registrarReenvioEmail(id: string) {
   await requireDirectiva();
-  const supabase = await createSupabaseServerClient();
-  const { data: actual } = await supabase
-    .from("socio_solicitudes")
-    .select("email_reenvios")
-    .eq("id", id)
-    .maybeSingle();
-  const n = (actual as { email_reenvios?: number } | null)?.email_reenvios ?? 0;
-  const { error } = await supabase
-    .from("socio_solicitudes")
-    .update({
-      email_reenvios: n + 1,
-      email_enviado_en: new Date().toISOString(),
-      estado: "enviada",
-    })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await enviarCorreoQrSocio(id);
   revalidatePath("/socios");
   revalidatePath(`/socios/${id}`);
 }

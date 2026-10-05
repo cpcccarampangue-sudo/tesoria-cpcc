@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { todosLosCursos } from "@/lib/cursos";
+import { crearCheckout, sumupHabilitado } from "@/lib/sumup/client";
+import { siteUrl } from "@/lib/qr";
 
 // Validacion basica de email (RFC-ish)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -82,7 +84,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       curso,
       monto_cuota: config.monto_cuota,
     })
-    .select("qr_token")
+    .select("id, qr_token")
     .single();
 
   if (error || !nueva) {
@@ -91,7 +93,41 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
     );
   }
 
-  // Redirigimos a la pagina de pago, pasando el token para que pueda
-  // mostrar el link SumUp y hacer seguimiento del estado.
-  redirect(`/incorporacion/pago?token=${(nueva as SocioSolicitud).qr_token}`);
+  const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
+
+  // Si SumUp API esta configurada, creamos un checkout dinamico y
+  // guardamos el checkout_id para linkearlo con el webhook. Redirigimos
+  // al apoderado directo al pago de SumUp.
+  if (sumupHabilitado()) {
+    try {
+      const checkout = await crearCheckout({
+        checkoutReference: `socio_${solicitud.id}`,
+        amount: config.monto_cuota,
+        currency: "CLP",
+        description: `Cuota socio CdP ${config.periodo_anio} - ${alumno}`,
+        returnUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
+        payToEmail: email,
+        payerName: nombre,
+      });
+      await supabase
+        .from("socio_solicitudes")
+        .update({ sumup_checkout_id: checkout.id })
+        .eq("id", solicitud.id);
+
+      // Si SumUp nos da una URL hosted, redirigimos ahi. Si no (p.ej.
+      // porque el merchant no tiene hosted checkout habilitado),
+      // caemos al flujo del link estatico.
+      if (checkout.checkout_url) {
+        redirect(checkout.checkout_url);
+      }
+    } catch {
+      // Si falla la creacion del checkout, dejamos continuar al flujo
+      // de link estatico asi al menos el apoderado puede pagar manual.
+      // La directiva vera la solicitud en estado "pendiente_pago" y
+      // podra marcarla pagada cuando llegue la transferencia.
+    }
+  }
+
+  // Fallback (y modo "sin SumUp API"): a la pagina de pago estatico.
+  redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
 }

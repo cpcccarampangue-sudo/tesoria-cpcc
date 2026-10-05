@@ -165,9 +165,9 @@ export function AccionesSolicitud({
       )}
 
       <p className="text-xs text-slate-400 pt-2 border-t border-slate-100">
-        ⚠️ El envío real del correo con el QR aún no está activado —
-        actualmente este botón solo registra el estado. La integración con
-        Resend se agregará en la próxima iteración.
+        El QR se genera al vuelo codificando la URL pública{" "}
+        <code>/socio/{s.qr_token.slice(0, 8)}...</code> y se envía al
+        correo del apoderado vía Resend.
       </p>
     </div>
   );
