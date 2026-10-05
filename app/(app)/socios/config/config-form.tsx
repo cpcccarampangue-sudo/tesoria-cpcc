@@ -74,7 +74,7 @@ export function ConfigForm({ config }: { config: SocioConfig }) {
               setForm((f) => ({ ...f, monto_cuota: e.target.value }))
             }
             min={0}
-            step={1000}
+            step={100}
             required
           />
           <p className="text-xs text-slate-500 mt-1">
