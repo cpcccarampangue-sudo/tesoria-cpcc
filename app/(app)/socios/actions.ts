@@ -52,6 +52,17 @@ export async function marcarSolicitudPagada(id: string) {
 export async function marcarSolicitudEnviada(id: string) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select("id, apoderado_id, periodo_anio")
+    .eq("id", id)
+    .maybeSingle();
+  const sol = solData as {
+    id: string;
+    apoderado_id: string | null;
+    periodo_anio: number;
+  } | null;
+
   const { error } = await supabase
     .from("socio_solicitudes")
     .update({
@@ -60,8 +71,18 @@ export async function marcarSolicitudEnviada(id: string) {
     })
     .eq("id", id);
   if (error) throw new Error(error.message);
+
+  // Reflejar en apoderados si esta linkeado.
+  if (sol?.apoderado_id) {
+    await supabase
+      .from("apoderados")
+      .update({ socio: true, socio_periodo: sol.periodo_anio })
+      .eq("id", sol.apoderado_id);
+  }
+
   revalidatePath("/socios");
   revalidatePath(`/socios/${id}`);
+  revalidatePath("/apoderados");
 }
 
 export async function rechazarSolicitud(id: string, notas?: string) {
@@ -99,4 +120,5 @@ export async function registrarReenvioEmail(id: string) {
   await enviarCorreoQrSocio(id);
   revalidatePath("/socios");
   revalidatePath(`/socios/${id}`);
+  revalidatePath("/apoderados");
 }

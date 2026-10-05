@@ -4,7 +4,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatFecha } from "@/lib/formatters";
 import { ApoderadosSearch } from "./apoderados-search";
 import { ApoderadoRow } from "./apoderado-row";
-import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
+import type {
+  Apoderado,
+  Contacto,
+  Estudiante,
+  SocioConfig,
+} from "@/lib/types";
 
 export const metadata = { title: "Familias — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
@@ -51,7 +56,20 @@ export default async function ApoderadosPage({
     new Set((cursosRaw ?? []).map((c) => c.curso).filter(Boolean) as string[])
   ).sort();
 
-  const totalSocios = apoderados.filter((a) => a.socio).length;
+  // Periodo vigente (año activo del modulo de socios) para distinguir
+  // "socio del año actual" vs "socio historico de otro año".
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("periodo_anio")
+    .eq("id", 1)
+    .maybeSingle();
+  const periodoVigente =
+    (cfgData as SocioConfig | null)?.periodo_anio ??
+    new Date().getFullYear();
+
+  const totalSocios = apoderados.filter(
+    (a) => a.socio && a.socio_periodo === periodoVigente
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -59,7 +77,8 @@ export default async function ApoderadosPage({
         <div>
           <h1 className="text-2xl font-semibold">Familias</h1>
           <p className="text-sm text-slate-600">
-            {apoderados.length} familia(s) mostradas · {totalSocios} socias
+            {apoderados.length} familia(s) mostradas · {totalSocios} socia(s)
+            activa(s) {periodoVigente}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -112,6 +131,7 @@ export default async function ApoderadosPage({
                   contactos={a.contactos ?? []}
                   estudiantes={a.estudiantes ?? []}
                   altaLabel={formatFecha(a.created_at)}
+                  periodoVigente={periodoVigente}
                 />
               ))}
             </tbody>

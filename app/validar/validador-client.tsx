@@ -7,8 +7,7 @@ type ResultadoValidacion =
   | {
       estado: "activo";
       apoderado: string;
-      alumno: string;
-      curso: string;
+      hijos: Array<{ nombre: string; curso: string | null }>;
       periodo: number;
       pagadaEn: string | null;
     }
@@ -148,20 +147,29 @@ export function ValidadorClient() {
           <div className="text-lg font-bold text-green-900">
             Socio activo {resultado.periodo}
           </div>
-          <div className="pt-2 border-t border-green-200 space-y-1 text-sm text-slate-800">
+          <div className="pt-2 border-t border-green-200 space-y-2 text-sm text-slate-800 text-left">
             <div>
               <span className="text-xs uppercase text-slate-500">Familia</span>
               <div className="font-semibold">{resultado.apoderado}</div>
             </div>
             <div>
-              <span className="text-xs uppercase text-slate-500">Alumno</span>
-              <div>
-                {resultado.alumno} · {resultado.curso}
-              </div>
+              <span className="text-xs uppercase text-slate-500">
+                {resultado.hijos.length > 1 ? "Alumnos" : "Alumno"}
+              </span>
+              <ul className="mt-0.5 space-y-0.5">
+                {resultado.hijos.map((h, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{h.nombre}</span>
+                    {h.curso && (
+                      <span className="text-slate-500"> · {h.curso}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
           {resultado.pagadaEn && (
-            <p className="text-xs text-green-800 pt-2 border-t border-green-200">
+            <p className="text-xs text-green-800 pt-2 border-t border-green-200 text-center">
               Pagada el{" "}
               {new Date(resultado.pagadaEn).toLocaleDateString("es-CL")}
             </p>

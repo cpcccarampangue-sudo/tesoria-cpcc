@@ -1,6 +1,10 @@
 import Image from "next/image";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { SocioConfig, SocioSolicitud } from "@/lib/types";
+import type {
+  Estudiante,
+  SocioConfig,
+  SocioSolicitud,
+} from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
 import { AppFooter } from "@/components/app-footer";
 
@@ -25,6 +29,20 @@ export default async function SocioPublicoPage({
   ]);
   const solicitud = solData as SocioSolicitud | null;
   const config = cfgData as SocioConfig | null;
+
+  // Cargamos los hijos de la familia linkeada para mostrarlos en el QR.
+  // Si no esta linkeada (solicitudes antiguas), caemos al alumno_nombre
+  // string.
+  let hijos: Estudiante[] = [];
+  if (solicitud?.apoderado_id) {
+    const { data: estData } = await supabase
+      .from("estudiantes")
+      .select("*")
+      .eq("apoderado_id", solicitud.apoderado_id)
+      .eq("activo", true)
+      .order("nombre");
+    hijos = (estData as Estudiante[] | null) ?? [];
+  }
 
   // Reglas de validez:
   //  - La solicitud existe
@@ -75,7 +93,7 @@ export default async function SocioPublicoPage({
             <div className="text-xl font-bold text-green-900">
               Socio activo {solicitud.periodo_anio}
             </div>
-            <div className="pt-3 border-t border-green-200 space-y-1 text-sm text-slate-800">
+            <div className="pt-3 border-t border-green-200 space-y-2 text-sm text-slate-800">
               <div>
                 <span className="text-xs uppercase text-slate-500">
                   Familia
@@ -86,15 +104,33 @@ export default async function SocioPublicoPage({
               </div>
               <div>
                 <span className="text-xs uppercase text-slate-500">
-                  Alumno
+                  {hijos.length > 1 ? "Alumnos" : "Alumno"}
                 </span>
-                <div className="font-medium">
-                  {solicitud.alumno_nombre}
-                </div>
-              </div>
-              <div>
-                <span className="text-xs uppercase text-slate-500">Curso</span>
-                <div className="font-medium">{solicitud.curso}</div>
+                {hijos.length > 0 ? (
+                  <ul className="mt-1 space-y-0.5">
+                    {hijos.map((h) => (
+                      <li key={h.id} className="font-medium">
+                        {h.nombre}
+                        {h.curso && (
+                          <span className="text-slate-500 font-normal">
+                            {" · "}
+                            {h.curso}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="font-medium">
+                    {solicitud.alumno_nombre}
+                    {solicitud.curso && (
+                      <span className="text-slate-500 font-normal">
+                        {" · "}
+                        {solicitud.curso}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <p className="text-xs text-green-800 pt-2 border-t border-green-200">

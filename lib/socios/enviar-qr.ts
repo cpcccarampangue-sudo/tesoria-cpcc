@@ -42,4 +42,14 @@ export async function enviarCorreoQrSocio(
     })
     .eq("id", solicitudId);
   if (updErr) throw new Error(updErr.message);
+
+  // Marca el apoderado como socio activo del periodo, si esta linkeado.
+  // Hoy el flujo publico siempre linkea; esto cubre tambien los casos
+  // manuales desde el admin donde se puede haber linkeado despues.
+  if (s.apoderado_id) {
+    await supabase
+      .from("apoderados")
+      .update({ socio: true, socio_periodo: s.periodo_anio })
+      .eq("id", s.apoderado_id);
+  }
 }

@@ -4,7 +4,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { SocioConfig, SocioSolicitud } from "@/lib/types";
+import type { Estudiante, SocioConfig, SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -76,11 +76,28 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Cargar hijos de la familia linkeada, si aplica.
+  let hijos: Array<{ nombre: string; curso: string | null }> = [];
+  if (solicitud.apoderado_id) {
+    const { data: estData } = await supabase
+      .from("estudiantes")
+      .select("nombre, curso")
+      .eq("apoderado_id", solicitud.apoderado_id)
+      .eq("activo", true)
+      .order("nombre");
+    hijos = ((estData as Pick<Estudiante, "nombre" | "curso">[] | null) ?? []).map(
+      (e) => ({ nombre: e.nombre, curso: e.curso })
+    );
+  }
+  // Fallback para solicitudes antiguas sin apoderado_id linkeado.
+  if (hijos.length === 0) {
+    hijos = [{ nombre: solicitud.alumno_nombre, curso: solicitud.curso }];
+  }
+
   return NextResponse.json({
     estado: "activo",
     apoderado: solicitud.apoderado_nombre,
-    alumno: solicitud.alumno_nombre,
-    curso: solicitud.curso,
+    hijos,
     periodo: solicitud.periodo_anio,
     pagadaEn: solicitud.pagada_en,
   });

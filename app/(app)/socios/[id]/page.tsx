@@ -74,7 +74,23 @@ export default async function SolicitudDetallePage({
             <dt className="text-xs uppercase text-slate-500">
               Apoderado
             </dt>
-            <dd className="font-medium">{s.apoderado_nombre}</dd>
+            <dd className="font-medium">
+              {s.apoderado_id ? (
+                <Link
+                  href={`/apoderados/${s.apoderado_id}`}
+                  className="text-brand-700 hover:underline"
+                >
+                  {s.apoderado_nombre} ↗
+                </Link>
+              ) : (
+                <>
+                  {s.apoderado_nombre}
+                  <span className="ml-2 text-xs text-amber-700">
+                    (sin link a familia)
+                  </span>
+                </>
+              )}
+            </dd>
           </div>
           <div>
             <dt className="text-xs uppercase text-slate-500">Correo</dt>

@@ -25,6 +25,7 @@ export type Apoderado = {
   nombre: string;
   activo: boolean;
   socio: boolean;
+  socio_periodo: number | null;
   created_at: string;
 };
 
@@ -322,6 +323,7 @@ export type SocioSolicitud = {
   id: string;
   qr_token: string;
   periodo_anio: number;
+  apoderado_id: string | null;
   apoderado_nombre: string;
   apoderado_email: string;
   apoderado_rut: string | null;

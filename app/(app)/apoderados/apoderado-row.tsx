@@ -12,11 +12,13 @@ export function ApoderadoRow({
   contactos,
   estudiantes,
   altaLabel,
+  periodoVigente,
 }: {
   a: Apoderado;
   contactos: Contacto[];
   estudiantes: Estudiante[];
   altaLabel: string;
+  periodoVigente: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [confirm, setConfirm] = useState(false);
@@ -33,7 +35,23 @@ export function ApoderadoRow({
       </td>
       <td className="table-td">
         {a.socio ? (
-          <span className="badge-green">Socio</span>
+          a.socio_periodo === periodoVigente ? (
+            <span className="badge-green">Socio {periodoVigente}</span>
+          ) : a.socio_periodo ? (
+            <span
+              className="badge-slate"
+              title={`Fue socio en ${a.socio_periodo}; no renovó ${periodoVigente}.`}
+            >
+              Socio {a.socio_periodo}
+            </span>
+          ) : (
+            <span
+              className="badge-amber"
+              title="Marcado como socio sin año específico (dato antiguo)."
+            >
+              Socio
+            </span>
+          )
         ) : (
           <span className="badge-slate">No socio</span>
         )}
