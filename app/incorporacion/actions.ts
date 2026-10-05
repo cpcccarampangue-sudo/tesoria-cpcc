@@ -261,13 +261,17 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
 }
 
+export type HijoManual = {
+  nombre: string;
+  curso: string;
+};
+
 export type CrearSolicitudManualInput = {
   apoderado_nombre: string;
   apoderado_email: string;
   apoderado_rut?: string;
   apoderado_telefono?: string;
-  alumno_nombre: string;
-  curso: string;
+  hijos: HijoManual[];
 };
 
 // Flujo 2: la familia NO fue encontrada en el listado, el apoderado
@@ -279,8 +283,6 @@ export async function crearSolicitudManualSocio(
 ) {
   const email = input.apoderado_email.trim().toLowerCase();
   const nombre = input.apoderado_nombre.trim();
-  const alumno = input.alumno_nombre.trim();
-  const curso = input.curso.trim();
 
   if (!nombre || nombre.length < 3) {
     throw new Error("Ingresa el nombre del apoderado.");
@@ -288,12 +290,28 @@ export async function crearSolicitudManualSocio(
   if (!EMAIL_RE.test(email)) {
     throw new Error("El correo electrónico no es válido.");
   }
-  if (!alumno || alumno.length < 3) {
-    throw new Error("Ingresa el nombre del alumno.");
+
+  // Validacion de hijos: al menos uno, todos con nombre y curso valido.
+  const hijosLimpios = (input.hijos ?? [])
+    .map((h) => ({ nombre: h.nombre.trim(), curso: h.curso.trim() }))
+    .filter((h) => h.nombre.length > 0 && h.curso.length > 0);
+  if (hijosLimpios.length === 0) {
+    throw new Error("Ingresa al menos un hijo con nombre y curso.");
   }
-  if (!todosLosCursos().includes(curso)) {
-    throw new Error("Selecciona un curso válido.");
+  const cursosValidos = todosLosCursos();
+  for (const h of hijosLimpios) {
+    if (h.nombre.length < 3) {
+      throw new Error("El nombre del alumno debe tener al menos 3 caracteres.");
+    }
+    if (!cursosValidos.includes(h.curso)) {
+      throw new Error(`Curso inválido para "${h.nombre}".`);
+    }
   }
+
+  // Concatenamos para los campos planos de la solicitud; la info completa
+  // queda ahí para que la directiva la vea al vincular con la familia.
+  const alumnoRepr = hijosLimpios.map((h) => h.nombre).join(", ");
+  const cursoRepr = hijosLimpios.map((h) => h.curso).join(", ");
 
   const supabase = await createSupabaseServerClient();
 
@@ -341,8 +359,8 @@ export async function crearSolicitudManualSocio(
       apoderado_email: email,
       apoderado_rut: input.apoderado_rut?.trim() || null,
       apoderado_telefono: input.apoderado_telefono?.trim() || null,
-      alumno_nombre: alumno,
-      curso,
+      alumno_nombre: alumnoRepr,
+      curso: cursoRepr,
       monto_cuota: config.monto_cuota,
       estado: "pendiente_match",
     })

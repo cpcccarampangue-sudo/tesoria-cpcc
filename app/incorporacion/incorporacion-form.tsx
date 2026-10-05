@@ -45,9 +45,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     apoderado_email: "",
     apoderado_rut: "",
     apoderado_telefono: "",
-    alumno_nombre: "",
-    curso: "",
   });
+  const [hijos, setHijos] = useState<Array<{ nombre: string; curso: string }>>([
+    { nombre: "", curso: "" },
+  ]);
 
   function hintTipo(input: string) {
     if (!input.trim())
@@ -73,6 +74,8 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           } else {
             setManual((m) => ({ ...m, apoderado_nombre: consulta.trim() }));
           }
+          // Reset de hijos al llegar al flujo manual
+          setHijos([{ nombre: "", curso: "" }]);
           return;
         }
         if (resultado.familias.length === 1) {
@@ -129,12 +132,30 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     setError(null);
     startTransition(async () => {
       try {
-        await crearSolicitudManualSocio(manual);
+        await crearSolicitudManualSocio({
+          ...manual,
+          hijos,
+        });
       } catch (err) {
         if (esRedirect(err)) return;
         setError(err instanceof Error ? err.message : "Error.");
       }
     });
+  }
+
+  function actualizarHijo(
+    i: number,
+    patch: Partial<{ nombre: string; curso: string }>
+  ) {
+    setHijos((cur) =>
+      cur.map((h, idx) => (idx === i ? { ...h, ...patch } : h))
+    );
+  }
+  function agregarHijo() {
+    setHijos((cur) => [...cur, { nombre: "", curso: "" }]);
+  }
+  function quitarHijo(i: number) {
+    setHijos((cur) => (cur.length <= 1 ? cur : cur.filter((_, idx) => idx !== i)));
   }
 
   // === RENDER ===
@@ -437,48 +458,85 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       </div>
 
       <div className="border-t border-slate-200 pt-3 mt-4">
-        <h3 className="font-medium text-slate-800 mb-2">Datos del alumno</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="label">Nombre del alumno</label>
-            <input
-              className="input"
-              value={manual.alumno_nombre}
-              onChange={(e) =>
-                setManual((m) => ({ ...m, alumno_nombre: e.target.value }))
-              }
-              placeholder="Ej: Juan Pérez"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Curso</label>
-            <select
-              className="input"
-              value={manual.curso}
-              onChange={(e) =>
-                setManual((m) => ({ ...m, curso: e.target.value }))
-              }
-              required
+        <h3 className="font-medium text-slate-800 mb-1">
+          Datos de los alumnos
+        </h3>
+        <p className="text-xs text-slate-500 mb-2">
+          Puedes agregar varios hijos. Esto nos ayuda a identificar
+          correctamente a tu familia cuando la crucemos con el listado del
+          colegio.
+        </p>
+        <div className="space-y-2">
+          {hijos.map((h, i) => (
+            <div
+              key={i}
+              className="border border-slate-200 rounded-md p-2 space-y-2"
             >
-              <option value="">— seleccionar —</option>
-              {CURSO_GRUPOS.map((grupo) => (
-                <optgroup key={grupo.nombre} label={grupo.nombre}>
-                  {grupo.niveles.flatMap((nivel) =>
-                    CURSO_LETRAS.map((letra) => (
-                      <option
-                        key={`${nivel}-${letra}`}
-                        value={`${nivel} ${letra}`}
-                      >
-                        {nivel} {letra}
-                      </option>
-                    ))
-                  )}
-                </optgroup>
-              ))}
-            </select>
-          </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600">
+                  Hijo {i + 1}
+                </span>
+                {hijos.length > 1 && (
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 hover:underline"
+                    onClick={() => quitarHijo(i)}
+                  >
+                    Quitar
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="label text-xs">Nombre del alumno</label>
+                  <input
+                    className="input"
+                    value={h.nombre}
+                    onChange={(e) =>
+                      actualizarHijo(i, { nombre: e.target.value })
+                    }
+                    placeholder="Ej: Juan Pérez"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label text-xs">Curso</label>
+                  <select
+                    className="input"
+                    value={h.curso}
+                    onChange={(e) =>
+                      actualizarHijo(i, { curso: e.target.value })
+                    }
+                    required
+                  >
+                    <option value="">— seleccionar —</option>
+                    {CURSO_GRUPOS.map((grupo) => (
+                      <optgroup key={grupo.nombre} label={grupo.nombre}>
+                        {grupo.niveles.flatMap((nivel) =>
+                          CURSO_LETRAS.map((letra) => (
+                            <option
+                              key={`${nivel}-${letra}`}
+                              value={`${nivel} ${letra}`}
+                            >
+                              {nivel} {letra}
+                            </option>
+                          ))
+                        )}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
+        <button
+          type="button"
+          className="text-sm text-brand-700 hover:underline mt-2"
+          onClick={agregarHijo}
+        >
+          + Agregar otro hijo
+        </button>
       </div>
 
       <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
