@@ -48,6 +48,166 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   revalidatePath("/incorporacion");
 }
 
+// Crea una solicitud de socio + registra el pago en el mismo paso, sin
+// pasar por /incorporacion. Util cuando la tesorera recibe un pago en
+// efectivo o transferencia directa en una reunion.
+export type CrearSocioManualInput = {
+  apoderado_id: string;
+  apoderado_email: string;
+  apoderado_telefono?: string;
+  estudiante_ids: string[];
+  cuenta_id: string;
+  fecha: string; // YYYY-MM-DD
+  metodo: "efectivo" | "transferencia" | "cheque" | "otro";
+  nota?: string;
+  enviarQr?: boolean;
+};
+
+const EMAIL_RE_SIMPLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function crearSocioConPagoManual(
+  input: CrearSocioManualInput
+): Promise<string> {
+  const profile = await requireDirectiva();
+  const email = input.apoderado_email.trim().toLowerCase();
+  if (!EMAIL_RE_SIMPLE.test(email)) {
+    throw new Error("El correo electrónico no es válido.");
+  }
+  if (!input.cuenta_id) throw new Error("Debes elegir una cuenta.");
+  if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
+    throw new Error("Selecciona al menos un hijo.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: apoderadoData } = await supabase
+    .from("apoderados")
+    .select("id, nombre")
+    .eq("id", input.apoderado_id)
+    .maybeSingle();
+  const apoderado = apoderadoData as { id: string; nombre: string } | null;
+  if (!apoderado) throw new Error("Familia no encontrada.");
+
+  const { data: estudiantesData } = await supabase
+    .from("estudiantes")
+    .select("id, nombre, curso")
+    .eq("apoderado_id", input.apoderado_id)
+    .in("id", input.estudiante_ids);
+  const estudiantes =
+    (estudiantesData as
+      | { id: string; nombre: string; curso: string | null }[]
+      | null) ?? [];
+  if (estudiantes.length === 0) {
+    throw new Error("Los hijos seleccionados no corresponden a esta familia.");
+  }
+
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+  const config = cfgData as {
+    periodo_anio: number;
+    monto_cuota: number;
+    categoria_cuota_id: string | null;
+  } | null;
+  if (!config) throw new Error("Sistema de socios no está configurado.");
+
+  // Verificar duplicado: misma familia + periodo + estado activo
+  const { data: existenteData } = await supabase
+    .from("socio_solicitudes")
+    .select("id, estado")
+    .eq("periodo_anio", config.periodo_anio)
+    .eq("apoderado_id", input.apoderado_id)
+    .in("estado", ["pendiente_pago", "pagada", "enviada"])
+    .maybeSingle();
+  if (existenteData) {
+    throw new Error(
+      `Esta familia ya tiene una solicitud activa del año ${config.periodo_anio}. Revisa en la lista de socios.`
+    );
+  }
+
+  const alumnoRepr = estudiantes.map((e) => e.nombre).join(", ");
+  const cursoRepr = estudiantes.map((e) => e.curso ?? "—").join(", ");
+
+  // 1. Crear movimiento ingreso
+  const metodoLabel: Record<string, string> = {
+    efectivo: "Efectivo",
+    transferencia: "Transferencia bancaria",
+    cheque: "Cheque",
+    otro: "Otro",
+  };
+  const descripcion = `Cuota socio CdP ${config.periodo_anio} — ${apoderado.nombre} (${metodoLabel[input.metodo]})`;
+
+  const { data: movData, error: movErr } = await supabase
+    .from("movimientos")
+    .insert({
+      fecha: input.fecha,
+      tipo: "ingreso",
+      monto: config.monto_cuota,
+      descripcion,
+      categoria_id: config.categoria_cuota_id,
+      cuenta_id: input.cuenta_id,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (movErr || !movData) {
+    throw new Error(
+      `No se pudo crear el movimiento: ${movErr?.message ?? "sin detalle"}`
+    );
+  }
+
+  // 2. Crear solicitud ya pagada + linkeada al movimiento
+  const notaInterna = [
+    `Creada manualmente desde el admin por la directiva.`,
+    `Pago ${metodoLabel[input.metodo]} registrado el ${new Date().toLocaleDateString("es-CL")}.`,
+    input.nota?.trim() ? `Nota: ${input.nota.trim()}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { data: solData, error: solErr } = await supabase
+    .from("socio_solicitudes")
+    .insert({
+      periodo_anio: config.periodo_anio,
+      apoderado_id: input.apoderado_id,
+      apoderado_nombre: apoderado.nombre,
+      apoderado_email: email,
+      apoderado_telefono: input.apoderado_telefono?.trim() || null,
+      alumno_nombre: alumnoRepr,
+      curso: cursoRepr,
+      monto_cuota: config.monto_cuota,
+      estado: "pagada",
+      pagada_en: new Date(input.fecha).toISOString(),
+      movimiento_id: movData.id,
+      notas_internas: notaInterna,
+      procesada_por: profile.id,
+    })
+    .select("id")
+    .single();
+  if (solErr || !solData) {
+    throw new Error(
+      `No se pudo crear la solicitud: ${solErr?.message ?? "sin detalle"}`
+    );
+  }
+
+  // 3. Enviar QR si se solicito
+  if (input.enviarQr) {
+    try {
+      await enviarCorreoQrSocio(solData.id);
+    } catch (err) {
+      console.error("Error enviando QR tras creacion manual:", err);
+      // No fallamos: la solicitud ya fue creada, se puede reenviar manual.
+    }
+  }
+
+  revalidatePath("/socios");
+  revalidatePath("/movimientos");
+  revalidatePath("/apoderados");
+  return solData.id as string;
+}
+
 export type RegistrarPagoManualInput = {
   solicitud_id: string;
   cuenta_id: string;

@@ -93,6 +93,9 @@ export default async function SociosPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/socios/nuevo" className="btn-primary text-sm">
+            💵 Nuevo socio (pago manual)
+          </Link>
           <Link href="/socios/config" className="btn-secondary text-sm">
             ⚙️ Configuración
           </Link>
