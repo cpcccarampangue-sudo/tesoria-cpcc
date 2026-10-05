@@ -7,10 +7,12 @@ import {
   buscarFamilias,
   crearSolicitudSocio,
   crearSolicitudManualSocio,
+} from "./actions";
+import {
   detectarTipoBusqueda,
   type FamiliaCandidata,
   type ResultadoBusqueda,
-} from "./actions";
+} from "./tipos";
 
 type Paso =
   | { nombre: "buscar" }

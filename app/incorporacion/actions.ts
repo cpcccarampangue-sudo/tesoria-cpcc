@@ -15,29 +15,10 @@ import { todosLosCursos } from "@/lib/cursos";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type TipoBusqueda = "email" | "nombre";
-
-export type FamiliaCandidata = {
-  apoderado: Apoderado;
-  contactos: Contacto[];
-  estudiantes: Estudiante[];
-};
-
-export type ResultadoBusqueda = {
-  tipo: TipoBusqueda;
-  familias: FamiliaCandidata[];
-  // true si hay mas resultados que los devueltos (hay que refinar).
-  hayMas: boolean;
-};
-
-// Decide que tipo de busqueda hacer segun lo que viene del usuario.
-// Correo (contiene @) o nombre/apellido (cualquier texto). El Excel del
-// colegio no trae RUT, asi que buscamos por apellido de familia o alumno.
-export function detectarTipoBusqueda(input: string): TipoBusqueda {
-  const trimmed = input.trim();
-  if (trimmed.includes("@") && EMAIL_RE.test(trimmed)) return "email";
-  return "nombre";
-}
+// Reexportamos desde el helper no-server para que la UI pueda importar
+// detectarTipoBusqueda sin problemas de "use server".
+import type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda } from "./tipos";
+export type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda };
 
 const MAX_RESULTADOS = 10;
 
@@ -53,7 +34,7 @@ export async function buscarFamilias(
     throw new Error("Ingresa un correo o apellido para buscar.");
   }
 
-  const tipo = detectarTipoBusqueda(trimmed);
+  const tipo: TipoBusqueda = trimmed.includes("@") && EMAIL_RE.test(trimmed) ? "email" : "nombre";
   const supabase = await createSupabaseServerClient();
 
   // Set de apoderado_ids encontrados segun el criterio.
