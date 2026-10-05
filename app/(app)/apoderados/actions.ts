@@ -471,7 +471,9 @@ export async function importarApoderadosCSV(
         if (exContacto) apoderadoId = exContacto.apoderado_id;
       }
 
-      // Parse socio: acepta si/sí/yes/true/1 como true; no/false/0 como false
+      // Parse socio: acepta si/sí/yes/true/1 como true; no/false/0 como false.
+      // Solo se usa para INSERT de familias nuevas; en UPDATE no se pisa
+      // (el estado de socio lo gestiona /socios cuando se paga la cuota).
       const socioRaw = (r.socio ?? "").trim().toLowerCase();
       const socio =
         socioRaw === ""
@@ -481,12 +483,15 @@ export async function importarApoderadosCSV(
           : true;
 
       if (apoderadoId) {
+        // Familia existente: NO tocar socio ni socio_periodo (esos los
+        // gestiona el modulo /socios). Solo actualizamos nombre y activo.
         await admin
           .from("apoderados")
-          .update({ nombre, activo: true, socio })
+          .update({ nombre, activo: true })
           .eq("id", apoderadoId);
         result.actualizados++;
       } else {
+        // Familia nueva: usa el valor del Excel como estado inicial.
         const { data, error } = await admin
           .from("apoderados")
           .insert({ nombre, activo: true, socio })

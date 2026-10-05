@@ -536,28 +536,22 @@ async function runImportFromBytes(
     result.familiasCreadas = nuevas.length;
   }
 
-  // Bulk update socio para existentes (2 queries)
-  const idsSiSocio = actualizar
-    .filter((f) => f.socio)
+  // Bulk update de familias existentes: solo marcamos activo=true.
+  // NO pisamos los campos socio ni socio_periodo porque esos los
+  // gestiona el modulo /socios (cuando el apoderado paga la cuota),
+  // no el Excel del colegio. El Excel es fuente de verdad para
+  // identidad (nombre, contactos, estudiantes) pero NO para membresia.
+  // Las familias nuevas se insertan con el valor "socio" del Excel
+  // como estado inicial; las existentes conservan el suyo.
+  const idsExistentes = actualizar
     .map((f) => existentesMap.get(f.nombre)!)
     .filter(Boolean);
-  const idsNoSocio = actualizar
-    .filter((f) => !f.socio)
-    .map((f) => existentesMap.get(f.nombre)!)
-    .filter(Boolean);
-  await chunkedInFilter(idsSiSocio, 150, async (chunk) => {
+  await chunkedInFilter(idsExistentes, 150, async (chunk) => {
     const { error } = await admin
       .from("apoderados")
-      .update({ activo: true, socio: true })
+      .update({ activo: true })
       .in("id", chunk);
-    if (error) result.errores.push(`update socios: ${error.message}`);
-  });
-  await chunkedInFilter(idsNoSocio, 150, async (chunk) => {
-    const { error } = await admin
-      .from("apoderados")
-      .update({ activo: true, socio: false })
-      .in("id", chunk);
-    if (error) result.errores.push(`update no-socios: ${error.message}`);
+    if (error) result.errores.push(`update existentes: ${error.message}`);
   });
   result.familiasActualizadas = actualizar.length;
 
