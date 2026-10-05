@@ -25,6 +25,8 @@ export default async function IncorporacionPage() {
     monto_cuota: 20000,
     sumup_link: null,
     sumup_checkout_fijo: false,
+    cuenta_sumup_id: null,
+    categoria_cuota_id: null,
     mensaje_bienvenida: null,
     updated_at: new Date().toISOString(),
   };

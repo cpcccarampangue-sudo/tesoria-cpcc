@@ -9,6 +9,8 @@ import {
 } from "@/lib/types";
 import { AccionesSolicitud } from "./acciones";
 
+type CuentaRow = { id: string; nombre: string; es_principal: boolean };
+
 export const metadata = { title: "Solicitud de socio — Tesorería CPCC" };
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,15 @@ export default async function SolicitudDetallePage({
     .maybeSingle();
   if (!data) notFound();
   const s = data as SocioSolicitud;
+
+  // Cargar cuentas activas para el dialog de pago manual
+  const { data: cuentasData } = await supabase
+    .from("cuentas")
+    .select("id, nombre, es_principal")
+    .eq("activa", true)
+    .order("orden")
+    .order("nombre");
+  const cuentas = (cuentasData as CuentaRow[] | null) ?? [];
 
   // URL publica del QR (lo que codifica el QR en si).
   const siteUrl =
@@ -154,6 +165,23 @@ export default async function SolicitudDetallePage({
         </dl>
       </div>
 
+      {/* Movimiento asociado */}
+      {s.movimiento_id && (
+        <div className="card">
+          <h2 className="font-semibold mb-2">Movimiento asociado</h2>
+          <p className="text-sm">
+            Esta solicitud generó un movimiento tipo <strong>ingreso</strong>{" "}
+            en el libro de caja.{" "}
+            <Link
+              href={`/movimientos/${s.movimiento_id}`}
+              className="text-brand-700 underline"
+            >
+              Ver movimiento ↗
+            </Link>
+          </p>
+        </div>
+      )}
+
       {/* SumUp (si tiene datos de pago registrados) */}
       {(s.sumup_checkout_id || s.sumup_transaction_id) && (
         <div className="card">
@@ -224,7 +252,7 @@ export default async function SolicitudDetallePage({
       {/* Acciones */}
       <div className="card">
         <h2 className="font-semibold mb-3">Acciones</h2>
-        <AccionesSolicitud solicitud={s} />
+        <AccionesSolicitud solicitud={s} cuentas={cuentas} />
       </div>
     </div>
   );

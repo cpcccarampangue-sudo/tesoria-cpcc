@@ -26,7 +26,6 @@ export default async function AppLayout({
     { href: "/movimientos", label: "Movimientos" },
     { href: "/cuentas", label: "Cuentas" },
     { href: "/cartolas", label: "Cartolas" },
-    { href: "/cuotas", label: "Cuotas" },
     { href: "/eventos", label: "Eventos" },
     { href: "/apoderados", label: "Familias" },
     { href: "/socios", label: "Socios" },
@@ -41,7 +40,6 @@ export default async function AppLayout({
 
   const navBasico = [
     { href: "/dashboard", label: "Inicio" },
-    { href: "/cuotas", label: "Mis cuotas" },
     { href: "/eventos", label: "Eventos" },
     { href: "/ayuda", label: "Ayuda" },
   ];

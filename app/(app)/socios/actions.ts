@@ -44,8 +44,121 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   revalidatePath("/incorporacion");
 }
 
-// Marcar como pagada manualmente (fallback cuando no hay webhook SumUp
-// o cuando el pago llego por otro medio, p.ej. transferencia directa).
+export type RegistrarPagoManualInput = {
+  solicitud_id: string;
+  cuenta_id: string;
+  fecha: string; // YYYY-MM-DD
+  metodo: "efectivo" | "transferencia" | "cheque" | "otro";
+  nota?: string;
+};
+
+// Registra el pago manual de una solicitud de socio:
+//   1. Crea movimiento ingreso en el libro de caja con la cuenta y fecha
+//      indicadas, usando la categoria "Cuota socio CdP" de la config.
+//   2. Linkea el movimiento con la solicitud (socio_solicitudes.movimiento_id).
+//   3. Marca la solicitud como pagada y guarda el nombre del metodo en
+//      notas_internas (sumado a lo que ya tenia).
+export async function registrarPagoManualSocio(
+  input: RegistrarPagoManualInput
+) {
+  const profile = await requireDirectiva();
+  if (!input.cuenta_id) throw new Error("Debes elegir una cuenta.");
+  const supabase = await createSupabaseServerClient();
+
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select("*")
+    .eq("id", input.solicitud_id)
+    .maybeSingle();
+  const solicitud = solData as
+    | {
+        id: string;
+        apoderado_id: string | null;
+        apoderado_nombre: string;
+        periodo_anio: number;
+        monto_cuota: number;
+        estado: string;
+        notas_internas: string | null;
+        movimiento_id: string | null;
+      }
+    | null;
+  if (!solicitud) throw new Error("Solicitud no encontrada.");
+  if (solicitud.estado === "enviada" || solicitud.estado === "pagada") {
+    throw new Error("Esta solicitud ya figura pagada.");
+  }
+  if (solicitud.movimiento_id) {
+    throw new Error(
+      "Esta solicitud ya tiene un movimiento asociado. Elimina el movimiento primero si quieres rehacer el pago."
+    );
+  }
+
+  // Config: categoria para el movimiento
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("categoria_cuota_id")
+    .eq("id", 1)
+    .maybeSingle();
+  const categoriaId =
+    (cfgData as { categoria_cuota_id: string | null } | null)?.categoria_cuota_id ??
+    null;
+
+  const metodoLabel: Record<string, string> = {
+    efectivo: "Efectivo",
+    transferencia: "Transferencia bancaria",
+    cheque: "Cheque",
+    otro: "Otro",
+  };
+  const descripcion = `Cuota socio CdP ${solicitud.periodo_anio} — ${solicitud.apoderado_nombre}`;
+
+  const { data: movData, error: movErr } = await supabase
+    .from("movimientos")
+    .insert({
+      fecha: input.fecha,
+      tipo: "ingreso",
+      monto: solicitud.monto_cuota,
+      descripcion,
+      categoria_id: categoriaId,
+      cuenta_id: input.cuenta_id,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (movErr || !movData) {
+    throw new Error(
+      `No se pudo crear el movimiento: ${movErr?.message ?? "sin detalle"}`
+    );
+  }
+
+  const notaCombinada = [
+    solicitud.notas_internas?.trim(),
+    `Pago manual (${metodoLabel[input.metodo]}) registrado el ${new Date().toLocaleDateString("es-CL")}.`,
+    input.nota?.trim() ? `Nota: ${input.nota.trim()}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { error } = await supabase
+    .from("socio_solicitudes")
+    .update({
+      estado: "pagada",
+      pagada_en: new Date(input.fecha).toISOString(),
+      movimiento_id: movData.id,
+      notas_internas: notaCombinada || null,
+    })
+    .eq("id", input.solicitud_id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/socios");
+  revalidatePath(`/socios/${input.solicitud_id}`);
+  revalidatePath("/movimientos");
+  revalidatePath("/dashboard");
+  revalidatePath("/cuentas");
+  return movData.id as string;
+}
+
+// Marcar como pagada SIN crear movimiento (fallback cuando el movimiento
+// ya existe por otro flujo). Deprecada, mantener por compat con el admin
+// viejo.
 export async function marcarSolicitudPagada(id: string) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();

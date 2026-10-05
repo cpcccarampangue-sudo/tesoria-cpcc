@@ -3,18 +3,20 @@
 import { useState, useTransition } from "react";
 import type { SocioSolicitud } from "@/lib/types";
 import {
-  marcarSolicitudPagada,
   marcarSolicitudEnviada,
   rechazarSolicitud,
   anularSolicitud,
   registrarReenvioEmail,
 } from "../actions";
 import { VincularFamilia } from "./vincular-familia";
+import { PagoManualDialog, type CuentaOp } from "./pago-manual";
 
 export function AccionesSolicitud({
   solicitud: s,
+  cuentas,
 }: {
   solicitud: SocioSolicitud;
+  cuentas: CuentaOp[];
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -50,24 +52,25 @@ export function AccionesSolicitud({
       )}
 
       {s.estado === "pendiente_pago" && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="btn-primary"
-            disabled={pending}
-            onClick={() => run(() => marcarSolicitudPagada(s.id))}
-          >
-            ✓ Marcar como pagada
-          </button>
-          <button
-            className="btn-secondary"
-            disabled={pending}
-            onClick={() => run(() => anularSolicitud(s.id))}
-          >
-            Anular solicitud
-          </button>
-          <p className="text-xs text-slate-500 w-full">
-            Marca como pagada si confirmaste la transferencia por fuera del
-            webhook SumUp (ej. transferencia bancaria directa).
+        <div className="space-y-2">
+          <PagoManualDialog
+            solicitudId={s.id}
+            monto={s.monto_cuota}
+            cuentas={cuentas}
+          />
+          <div>
+            <button
+              className="text-xs text-slate-600 hover:underline"
+              disabled={pending}
+              onClick={() => run(() => anularSolicitud(s.id))}
+            >
+              Anular solicitud
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">
+            El pago manual crea automáticamente un movimiento tipo ingreso
+            en la cuenta seleccionada. Si el pago vino por SumUp y ya se
+            registró vía webhook, no necesitas hacer esto.
           </p>
         </div>
       )}

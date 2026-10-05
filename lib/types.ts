@@ -303,6 +303,8 @@ export type SocioConfig = {
   monto_cuota: number;
   sumup_link: string | null;
   sumup_checkout_fijo: boolean;
+  cuenta_sumup_id: string | null;
+  categoria_cuota_id: string | null;
   mensaje_bienvenida: string | null;
   updated_at: string;
 };
@@ -339,6 +341,7 @@ export type SocioSolicitud = {
   sumup_checkout_id: string | null;
   sumup_transaction_id: string | null;
   sumup_transaction_code: string | null;
+  movimiento_id: string | null;
   pagada_en: string | null;
   email_enviado_en: string | null;
   email_reenvios: number;
