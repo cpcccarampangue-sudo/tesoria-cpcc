@@ -97,7 +97,10 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
 
   // Si SumUp API esta configurada, creamos un checkout dinamico y
   // guardamos el checkout_id para linkearlo con el webhook. Redirigimos
-  // al apoderado directo al pago de SumUp.
+  // al apoderado directo al pago de SumUp. Importante: hay que separar
+  // la llamada a crearCheckout (puede fallar) del redirect (lanza
+  // NEXT_REDIRECT que no debe ser tragado por el catch).
+  let urlSumUp: string | null = null;
   if (sumupHabilitado()) {
     try {
       const checkout = await crearCheckout({
@@ -114,20 +117,25 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
         .update({ sumup_checkout_id: checkout.id })
         .eq("id", solicitud.id);
 
-      // Si SumUp nos da una URL hosted, redirigimos ahi. Si no (p.ej.
-      // porque el merchant no tiene hosted checkout habilitado),
-      // caemos al flujo del link estatico.
       if (checkout.checkout_url) {
-        redirect(checkout.checkout_url);
+        urlSumUp = checkout.checkout_url;
       }
-    } catch {
-      // Si falla la creacion del checkout, dejamos continuar al flujo
-      // de link estatico asi al menos el apoderado puede pagar manual.
+    } catch (err) {
+      // Loggeamos para debug en Vercel Functions logs, pero no bloqueamos.
       // La directiva vera la solicitud en estado "pendiente_pago" y
-      // podra marcarla pagada cuando llegue la transferencia.
+      // podra marcarla pagada cuando llegue la transferencia o reintentarla.
+      console.error(
+        "[incorporacion] SumUp crearCheckout fallo:",
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
-  // Fallback (y modo "sin SumUp API"): a la pagina de pago estatico.
+  // Los redirects van fuera del try/catch: Next.js los implementa
+  // lanzando NEXT_REDIRECT como excepcion, y un catch generico se la
+  // comeria sin redirigir.
+  if (urlSumUp) {
+    redirect(urlSumUp);
+  }
   redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
 }
