@@ -195,7 +195,9 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
     );
   }
 
-  // Duplicado: misma familia + mismo periodo + estado activo
+  // Duplicado 1: misma familia + mismo periodo + estado activo.
+  // Cubre el caso principal: si el padre ya pago, la madre al confirmar
+  // es redirigida al mismo pago o rechazada si ya es socia.
   const { data: existenteData } = await supabase
     .from("socio_solicitudes")
     .select("qr_token, estado")
@@ -213,6 +215,40 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
     throw new Error(
       `Esta familia ya figura como socia activa del año ${config.periodo_anio}. Si necesitas reemitir el QR, contacta a la directiva.`
     );
+  }
+
+  // Duplicado 2: solicitud "pendiente_match" (flujo manual sin apoderado_id)
+  // cuyo email coincida con cualquier correo de los contactos de esta
+  // familia. Caso: un padre llena el formulario manual porque no se
+  // encontro, y despues la madre si encuentra la familia. Prevenimos
+  // doble inscripcion de la misma familia por rutas distintas.
+  const { data: emailsData } = await supabase
+    .from("contactos")
+    .select("email")
+    .eq("apoderado_id", input.apoderado_id)
+    .not("email", "is", null);
+  const emailsFamilia = ((emailsData as { email: string | null }[] | null) ?? [])
+    .map((c) => c.email?.toLowerCase().trim())
+    .filter((e): e is string => !!e);
+  if (emailsFamilia.length > 0) {
+    const { data: pendienteManual } = await supabase
+      .from("socio_solicitudes")
+      .select("qr_token, apoderado_email")
+      .eq("periodo_anio", config.periodo_anio)
+      .is("apoderado_id", null)
+      .in("estado", ["pendiente_match", "pendiente_pago", "pagada", "enviada"])
+      .in("apoderado_email", emailsFamilia)
+      .limit(1)
+      .maybeSingle();
+    if (pendienteManual) {
+      const otra = pendienteManual as {
+        qr_token: string;
+        apoderado_email: string;
+      };
+      throw new Error(
+        `Ya hay una solicitud activa de esta familia enviada desde el correo "${otra.apoderado_email}". Contacta a la directiva para que la verifiquen antes de continuar.`
+      );
+    }
   }
 
   const alumnoRepr = estudiantes.map((e) => e.nombre).join(", ");

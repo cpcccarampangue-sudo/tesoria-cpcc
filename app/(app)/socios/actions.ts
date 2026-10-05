@@ -232,19 +232,50 @@ export async function rechazarSolicitud(id: string, notas?: string) {
 // Vincula una solicitud 'pendiente_match' (creada por el flujo manual del
 // formulario publico) con una familia existente. Cambia estado a
 // pendiente_pago para que siga el flujo normal (pagar o marcar pagada).
+// Si la familia ya tiene otra solicitud activa en el periodo, falla
+// avisando (para no duplicar: p.ej. el otro padre ya la inscribio).
 export async function vincularSolicitudConApoderado(
   solicitudId: string,
   apoderadoId: string
 ) {
   await requireDirectiva();
   const supabase = await createSupabaseServerClient();
-  // Validar que el apoderado existe
+
   const { data: apoderadoData } = await supabase
     .from("apoderados")
     .select("id, nombre")
     .eq("id", apoderadoId)
     .maybeSingle();
   if (!apoderadoData) throw new Error("Familia no encontrada.");
+
+  // Leer el periodo de la solicitud a vincular
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select("periodo_anio, apoderado_email")
+    .eq("id", solicitudId)
+    .maybeSingle();
+  const sol = solData as
+    | { periodo_anio: number; apoderado_email: string }
+    | null;
+  if (!sol) throw new Error("Solicitud no encontrada.");
+
+  // Chequear si la familia ya tiene otra solicitud activa de este periodo
+  const { data: otraData } = await supabase
+    .from("socio_solicitudes")
+    .select("id, estado, apoderado_email")
+    .eq("periodo_anio", sol.periodo_anio)
+    .eq("apoderado_id", apoderadoId)
+    .in("estado", ["pendiente_pago", "pagada", "enviada"])
+    .neq("id", solicitudId)
+    .maybeSingle();
+  const otra = otraData as
+    | { id: string; estado: string; apoderado_email: string }
+    | null;
+  if (otra) {
+    throw new Error(
+      `Esta familia ya tiene una solicitud ${otra.estado === "pagada" || otra.estado === "enviada" ? "pagada" : "en proceso"} desde el correo "${otra.apoderado_email}". No se puede vincular esta solicitud; anúlala desde el detalle para evitar duplicados.`
+    );
+  }
 
   const { error } = await supabase
     .from("socio_solicitudes")
