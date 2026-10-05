@@ -290,3 +290,54 @@ export type CuotaEstadoApoderado = {
   pagado: number;
   estado: CuotaEstado;
 };
+
+// === SOCIOS (incorporacion con QR via SumUp) ===
+
+export type SocioConfig = {
+  id: number;
+  periodo_anio: number;
+  monto_cuota: number;
+  sumup_link: string | null;
+  sumup_checkout_fijo: boolean;
+  mensaje_bienvenida: string | null;
+  updated_at: string;
+};
+
+export type SocioEstado =
+  | "pendiente_pago"
+  | "pagada"
+  | "enviada"
+  | "rechazada"
+  | "anulada";
+
+export const SOCIO_ESTADO_LABEL: Record<SocioEstado, string> = {
+  pendiente_pago: "Pendiente de pago",
+  pagada: "Pagada",
+  enviada: "QR enviado",
+  rechazada: "Rechazada",
+  anulada: "Anulada",
+};
+
+export type SocioSolicitud = {
+  id: string;
+  qr_token: string;
+  periodo_anio: number;
+  apoderado_nombre: string;
+  apoderado_email: string;
+  apoderado_rut: string | null;
+  apoderado_telefono: string | null;
+  alumno_nombre: string;
+  curso: string;
+  monto_cuota: number;
+  sumup_checkout_id: string | null;
+  sumup_transaction_id: string | null;
+  sumup_transaction_code: string | null;
+  pagada_en: string | null;
+  email_enviado_en: string | null;
+  email_reenvios: number;
+  estado: SocioEstado;
+  notas_internas: string | null;
+  procesada_por: string | null;
+  created_at: string;
+  updated_at: string;
+};

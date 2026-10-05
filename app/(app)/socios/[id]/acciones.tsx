@@ -1,0 +1,174 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import type { SocioSolicitud } from "@/lib/types";
+import {
+  marcarSolicitudPagada,
+  marcarSolicitudEnviada,
+  rechazarSolicitud,
+  anularSolicitud,
+  registrarReenvioEmail,
+} from "../actions";
+
+export function AccionesSolicitud({
+  solicitud: s,
+}: {
+  solicitud: SocioSolicitud;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [confirmRechazo, setConfirmRechazo] = useState(false);
+  const [notas, setNotas] = useState("");
+
+  function run(fn: () => Promise<void>) {
+    setError(null);
+    setSuccess(null);
+    startTransition(async () => {
+      try {
+        await fn();
+        setSuccess("Acción completada.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error.");
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-3 text-sm">
+      {s.estado === "pendiente_pago" && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-primary"
+            disabled={pending}
+            onClick={() => run(() => marcarSolicitudPagada(s.id))}
+          >
+            ✓ Marcar como pagada
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={pending}
+            onClick={() => run(() => anularSolicitud(s.id))}
+          >
+            Anular solicitud
+          </button>
+          <p className="text-xs text-slate-500 w-full">
+            Marca como pagada si confirmaste la transferencia por fuera del
+            webhook SumUp (ej. transferencia bancaria directa).
+          </p>
+        </div>
+      )}
+
+      {s.estado === "pagada" && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-primary"
+            disabled={pending}
+            onClick={() => run(() => registrarReenvioEmail(s.id))}
+          >
+            📧 Enviar QR por correo
+          </button>
+          <button
+            className="btn-secondary"
+            disabled={pending}
+            onClick={() => run(() => marcarSolicitudEnviada(s.id))}
+          >
+            Marcar como enviada (sin reenvío)
+          </button>
+          <p className="text-xs text-slate-500 w-full">
+            El pago está confirmado. Envía el QR al correo del apoderado.
+          </p>
+        </div>
+      )}
+
+      {s.estado === "enviada" && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn-primary"
+            disabled={pending}
+            onClick={() => run(() => registrarReenvioEmail(s.id))}
+          >
+            🔁 Reenviar QR
+          </button>
+          <p className="text-xs text-slate-500 w-full">
+            Si el apoderado reporta que no recibió el correo o lo perdió,
+            puedes reenviarlo. Reenvíos:{" "}
+            <strong>{s.email_reenvios}</strong>.
+          </p>
+        </div>
+      )}
+
+      {(s.estado === "pendiente_pago" || s.estado === "pagada") &&
+        !confirmRechazo && (
+          <div>
+            <button
+              className="text-red-600 hover:underline text-sm"
+              onClick={() => setConfirmRechazo(true)}
+            >
+              Rechazar solicitud...
+            </button>
+          </div>
+        )}
+
+      {confirmRechazo && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 space-y-2">
+          <div className="font-medium text-red-900">
+            ¿Rechazar esta solicitud?
+          </div>
+          <textarea
+            className="input text-sm"
+            rows={2}
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            placeholder="Motivo (opcional, queda como nota interna)"
+          />
+          <div className="flex gap-2">
+            <button
+              className="btn-primary bg-red-600 hover:bg-red-700"
+              disabled={pending}
+              onClick={() => run(() => rechazarSolicitud(s.id, notas))}
+            >
+              Confirmar rechazo
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setConfirmRechazo(false);
+                setNotas("");
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(s.estado === "rechazada" || s.estado === "anulada") && (
+        <div className="text-xs text-slate-500">
+          Esta solicitud fue{" "}
+          {s.estado === "rechazada" ? "rechazada" : "anulada"} y no se puede
+          revertir desde la UI. Si fue por error, elimínala directamente
+          desde la base de datos y pide al apoderado que vuelva a llenar el
+          formulario.
+        </div>
+      )}
+
+      {error && (
+        <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="text-sm bg-green-50 text-green-800 rounded-md p-3">
+          {success}
+        </div>
+      )}
+
+      <p className="text-xs text-slate-400 pt-2 border-t border-slate-100">
+        ⚠️ El envío real del correo con el QR aún no está activado —
+        actualmente este botón solo registra el estado. La integración con
+        Resend se agregará en la próxima iteración.
+      </p>
+    </div>
+  );
+}
