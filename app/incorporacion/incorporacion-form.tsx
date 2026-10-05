@@ -48,11 +48,11 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
   });
 
   function hintTipo(input: string) {
-    if (!input.trim()) return "Correo, RUT o nombre/apellido del alumno.";
+    if (!input.trim())
+      return "Correo del apoderado o apellido de la familia / alumno.";
     const t = detectarTipoBusqueda(input);
     if (t === "email") return "Buscando por correo…";
-    if (t === "rut") return "Buscando por RUT…";
-    return "Buscando por nombre del alumno…";
+    return "Buscando por apellido…";
   }
 
   function manejarBusqueda(e: React.FormEvent) {
@@ -64,13 +64,12 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         if (resultado.familias.length === 0) {
           // No se encontro: ofrecer flujo manual con la consulta inicial.
           setPaso({ nombre: "manual", consulta });
-          // Pre-llenar correo si lo que buscó es un correo
+          // Pre-llenar correo si lo que buscó es un correo; si fue un
+          // nombre, lo dejamos como pista en el nombre del apoderado.
           if (resultado.tipo === "email") {
             setManual((m) => ({ ...m, apoderado_email: consulta.trim() }));
-          } else if (resultado.tipo === "rut") {
-            setManual((m) => ({ ...m, apoderado_rut: consulta.trim() }));
-          } else if (resultado.tipo === "alumno") {
-            setManual((m) => ({ ...m, alumno_nombre: consulta.trim() }));
+          } else {
+            setManual((m) => ({ ...m, apoderado_nombre: consulta.trim() }));
           }
           return;
         }
@@ -148,7 +147,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
             className="input"
             value={consulta}
             onChange={(e) => setConsulta(e.target.value)}
-            placeholder="correo@ejemplo.cl · 12.345.678-9 · Alonso Cáceres"
+            placeholder="correo@ejemplo.cl · Cáceres · Alonso"
             required
             autoComplete="off"
           />
@@ -170,9 +169,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         </button>
 
         <p className="text-xs text-slate-500 text-center pt-2">
-          Puedes buscar por correo electrónico, RUT de padre/madre, o
-          nombre/apellido del alumno. Si no te encontramos, te daremos la
-          opción de llenar el formulario manualmente.
+          Puedes buscar por correo electrónico del apoderado o por apellido
+          de la familia / alumno (ej. &quot;Cáceres&quot;). Si no te
+          encontramos, te daremos la opción de llenar el formulario
+          manualmente.
         </p>
       </form>
     );

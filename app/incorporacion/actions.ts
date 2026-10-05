@@ -14,9 +14,8 @@ import { siteUrl } from "@/lib/qr";
 import { todosLosCursos } from "@/lib/cursos";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const RUT_RE = /^[0-9kK.\-\s]+$/;
 
-export type TipoBusqueda = "email" | "rut" | "alumno";
+export type TipoBusqueda = "email" | "nombre";
 
 export type FamiliaCandidata = {
   apoderado: Apoderado;
@@ -31,32 +30,27 @@ export type ResultadoBusqueda = {
   hayMas: boolean;
 };
 
-// Normaliza un RUT: solo numeros y 'K', en minusculas, sin puntos ni
-// guiones. Usamos esta forma para comparar.
-function normalizarRut(rut: string): string {
-  return rut.replace(/[^0-9kK]/g, "").toLowerCase();
-}
-
 // Decide que tipo de busqueda hacer segun lo que viene del usuario.
+// Correo (contiene @) o nombre/apellido (cualquier texto). El Excel del
+// colegio no trae RUT, asi que buscamos por apellido de familia o alumno.
 export function detectarTipoBusqueda(input: string): TipoBusqueda {
   const trimmed = input.trim();
   if (trimmed.includes("@") && EMAIL_RE.test(trimmed)) return "email";
-  if (RUT_RE.test(trimmed) && /\d/.test(trimmed) && trimmed.length >= 7) {
-    return "rut";
-  }
-  return "alumno";
+  return "nombre";
 }
 
 const MAX_RESULTADOS = 10;
 
-// Busqueda flexible: email, RUT o nombre/apellido del alumno. Devuelve
-// hasta MAX_RESULTADOS familias; si hay mas, pide al usuario refinar.
+// Busqueda flexible: email del contacto o apellido de familia/alumno.
+// Para "nombre" matchea en apoderados.nombre (rotulo "Apellido1 Apellido2"
+// del Excel del colegio) y en estudiantes.nombre. Devuelve hasta
+// MAX_RESULTADOS familias; si hay mas, pide al usuario refinar.
 export async function buscarFamilias(
   consulta: string
 ): Promise<ResultadoBusqueda> {
   const trimmed = consulta.trim();
   if (!trimmed) {
-    throw new Error("Ingresa un correo, RUT o nombre del alumno para buscar.");
+    throw new Error("Ingresa un correo o apellido para buscar.");
   }
 
   const tipo = detectarTipoBusqueda(trimmed);
@@ -74,36 +68,26 @@ export async function buscarFamilias(
     apoderadoIds = (data ?? [])
       .map((r) => r.apoderado_id as string)
       .filter(Boolean);
-  } else if (tipo === "rut") {
-    const rutNorm = normalizarRut(trimmed);
-    // Fetch mas contactos para filtrar en memoria por rut normalizado
-    // (no podemos indexar con regexp en la query sin funcion personalizada).
-    const { data } = await supabase
-      .from("contactos")
-      .select("apoderado_id, rut")
-      .not("rut", "is", null)
-      .limit(500); // pool razonable del colegio
-    apoderadoIds = Array.from(
-      new Set(
-        (data ?? [])
-          .filter(
-            (r: { rut: string | null }) =>
-              r.rut && normalizarRut(r.rut) === rutNorm
-          )
-          .map((r) => (r as { apoderado_id: string }).apoderado_id)
-      )
-    );
   } else {
-    // tipo === "alumno"
-    const { data } = await supabase
-      .from("estudiantes")
-      .select("apoderado_id")
-      .ilike("nombre", `%${trimmed}%`)
-      .eq("activo", true)
-      .limit(MAX_RESULTADOS + 1);
-    apoderadoIds = Array.from(
-      new Set((data ?? []).map((r) => r.apoderado_id as string))
-    );
+    // tipo === "nombre": buscar en apellido de familia y en nombre de alumno
+    const [{ data: porFamilia }, { data: porAlumno }] = await Promise.all([
+      supabase
+        .from("apoderados")
+        .select("id")
+        .ilike("nombre", `%${trimmed}%`)
+        .limit(MAX_RESULTADOS + 1),
+      supabase
+        .from("estudiantes")
+        .select("apoderado_id")
+        .ilike("nombre", `%${trimmed}%`)
+        .eq("activo", true)
+        .limit(MAX_RESULTADOS + 1),
+    ]);
+    const ids = new Set<string>();
+    for (const r of porFamilia ?? []) ids.add((r as { id: string }).id);
+    for (const r of porAlumno ?? [])
+      ids.add((r as { apoderado_id: string }).apoderado_id);
+    apoderadoIds = Array.from(ids);
   }
 
   if (apoderadoIds.length === 0) {
