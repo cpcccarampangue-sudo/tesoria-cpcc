@@ -12,6 +12,9 @@ export type FamiliaCandidata = {
   apoderado: Apoderado;
   contactos: Contacto[];
   estudiantes: Estudiante[];
+  // Si la familia ya es socia activa del periodo vigente, el token del
+  // QR existente para mostrarlo en vez del formulario de pago.
+  yaSocioToken: string | null;
 };
 
 export type ResultadoBusqueda = {

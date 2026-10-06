@@ -18,6 +18,7 @@ type Paso =
   | { nombre: "buscar" }
   | { nombre: "elegir"; resultado: ResultadoBusqueda; consulta: string }
   | { nombre: "confirmar"; familia: FamiliaCandidata }
+  | { nombre: "ya_socio"; familia: FamiliaCandidata; qrToken: string }
   | { nombre: "manual"; consulta: string };
 
 function esRedirect(err: unknown): boolean {
@@ -37,7 +38,6 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
   // Estado del paso "confirmar"
   const [email, setEmail] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [estudianteIds, setEstudianteIds] = useState<Set<string>>(new Set());
 
   // Estado del paso "manual"
   const [manual, setManual] = useState({
@@ -51,11 +51,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
   ]);
 
   function hintTipo(input: string) {
-    if (!input.trim())
-      return "Correo del apoderado o apellido de la familia / alumno.";
+    if (!input.trim()) return "Ingresa tu correo electrónico registrado.";
     const t = detectarTipoBusqueda(input);
     if (t === "email") return "Buscando por correo…";
-    return "Buscando por apellido…";
+    return "Debe ser un correo electrónico válido.";
   }
 
   function manejarBusqueda(e: React.FormEvent) {
@@ -92,33 +91,36 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
   }
 
   function elegirFamilia(familia: FamiliaCandidata) {
+    // Si la familia ya es socia activa del periodo, mostrar la tarjeta
+    // verde con el QR directo en vez del formulario de pago.
+    if (familia.yaSocioToken) {
+      setPaso({
+        nombre: "ya_socio",
+        familia,
+        qrToken: familia.yaSocioToken,
+      });
+      return;
+    }
     setPaso({ nombre: "confirmar", familia });
-    setEstudianteIds(new Set(familia.estudiantes.map((e) => e.id)));
     // Pre-llenar email con uno de los contactos (el primero que tenga email).
     const emailContacto = familia.contactos.find((c) => c.email)?.email ?? "";
     setEmail(emailContacto);
-  }
-
-  function toggleEstudiante(id: string) {
-    setEstudianteIds((cur) => {
-      const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
   function confirmarPago(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (paso.nombre !== "confirmar") return;
+    // Usar siempre TODOS los hijos activos de la familia (la cuota es por
+    // familia, no por hijo). El checkbox desaparecio para simplificar.
+    const todosLosHijosIds = paso.familia.estudiantes.map((e) => e.id);
     startTransition(async () => {
       try {
         await crearSolicitudSocio({
           apoderado_id: paso.familia.apoderado.id,
           apoderado_email: email,
           apoderado_telefono: telefono,
-          estudiante_ids: Array.from(estudianteIds),
+          estudiante_ids: todosLosHijosIds,
         });
       } catch (err) {
         if (esRedirect(err)) return;
@@ -166,13 +168,13 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         <div>
           <label className="label">Encuentra tu familia</label>
           <input
-            type="text"
+            type="email"
             className="input"
             value={consulta}
             onChange={(e) => setConsulta(e.target.value)}
-            placeholder="correo@ejemplo.cl · Cáceres · Alonso"
+            placeholder="correo@ejemplo.cl"
             required
-            autoComplete="off"
+            autoComplete="email"
           />
           <p className="text-xs text-slate-500 mt-1">{hintTipo(consulta)}</p>
         </div>
@@ -192,10 +194,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         </button>
 
         <p className="text-xs text-slate-500 text-center pt-2">
-          Puedes buscar por correo electrónico del apoderado o por apellido
-          de la familia / alumno (ej. &quot;Cáceres&quot;). Si no te
-          encontramos, te daremos la opción de llenar el formulario
-          manualmente.
+          Usa el correo electrónico que tienes registrado en matrícula. Por
+          seguridad de las familias, el formulario público no permite
+          buscar por apellido o nombre del alumno. Si no sabes qué correo
+          está registrado, usa la opción manual.
         </p>
       </form>
     );
@@ -258,11 +260,57 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     );
   }
 
+  if (paso.nombre === "ya_socio") {
+    const siteUrl =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const urlPublica = `${siteUrl}/socio/${paso.qrToken}`;
+    return (
+      <div className="space-y-4">
+        <div className="rounded-md bg-green-50 border-2 border-green-500 p-4 text-center space-y-2">
+          <div className="text-5xl">✅</div>
+          <div className="text-lg font-bold text-green-900">
+            Ya eres socio activo
+          </div>
+          <p className="text-sm text-green-800">
+            La familia <strong>{paso.familia.apoderado.nombre}</strong> ya
+            figura como socia activa del período vigente. No necesitas
+            pagar de nuevo.
+          </p>
+        </div>
+
+        <a
+          href={urlPublica}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-primary w-full text-center"
+        >
+          Ver mi QR de socio →
+        </a>
+
+        <div className="text-xs text-slate-500 text-center">
+          <p>
+            Si quieres el QR en tu correo, contacta a la tesorería del CdP
+            para que te lo reenvíe.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn-secondary w-full"
+          onClick={() => {
+            setPaso({ nombre: "buscar" });
+            setConsulta("");
+          }}
+        >
+          ← Volver
+        </button>
+      </div>
+    );
+  }
+
   if (paso.nombre === "confirmar") {
     const familia = paso.familia;
-    const seleccionados = familia.estudiantes.filter((e) =>
-      estudianteIds.has(e.id)
-    );
+    const totalHijos = familia.estudiantes.length;
     return (
       <form onSubmit={confirmarPago} className="space-y-4">
         <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-900">
@@ -285,33 +333,24 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           </div>
         ) : (
           <div>
-            <label className="label">
-              ¿Qué hijos quieres incluir en el QR?
-            </label>
+            <label className="label">Hijos que quedarán en el QR</label>
             <p className="text-xs text-slate-500 mb-2">
-              Por defecto están todos marcados. La cuota es por familia, da
-              lo mismo cuántos hijos tengas.
+              La cuota es por familia; el QR cubre a todos tus hijos
+              matriculados.
             </p>
-            <div className="space-y-1">
+            <ul className="space-y-1">
               {familia.estudiantes.map((est) => (
-                <label
+                <li
                   key={est.id}
-                  className="flex items-center gap-2 p-2 rounded-md border border-slate-200 hover:border-slate-300 cursor-pointer"
+                  className="p-2 rounded-md border border-slate-200 bg-slate-50"
                 >
-                  <input
-                    type="checkbox"
-                    checked={estudianteIds.has(est.id)}
-                    onChange={() => toggleEstudiante(est.id)}
-                  />
-                  <div className="flex-1">
-                    <div className="font-medium text-sm">{est.nombre}</div>
-                    <div className="text-xs text-slate-500">
-                      {est.curso ?? "— sin curso —"}
-                    </div>
+                  <div className="font-medium text-sm">{est.nombre}</div>
+                  <div className="text-xs text-slate-500">
+                    {est.curso ?? "— sin curso —"}
                   </div>
-                </label>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
         )}
 
@@ -352,8 +391,8 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           {config.monto_cuota.toLocaleString("es-CL")} CLP · Socio{" "}
           {config.periodo_anio}
           <div className="text-xs mt-1">
-            Cubre {seleccionados.length} hijo
-            {seleccionados.length !== 1 ? "s" : ""} de la familia{" "}
+            Cubre {totalHijos} hijo
+            {totalHijos !== 1 ? "s" : ""} de la familia{" "}
             {familia.apoderado.nombre}.
           </div>
         </div>
@@ -375,7 +414,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           <button
             type="submit"
             className="btn-primary flex-1"
-            disabled={pending || seleccionados.length === 0}
+            disabled={pending || totalHijos === 0}
           >
             {pending ? "Procesando..." : "Confirmar y pagar →"}
           </button>

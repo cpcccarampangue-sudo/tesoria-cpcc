@@ -374,19 +374,97 @@ export async function marcarSolicitudEnviada(id: string) {
   revalidatePath("/apoderados");
 }
 
-export async function rechazarSolicitud(id: string, notas?: string) {
-  await requireDirectiva();
+// Helper interno: al rechazar o anular una solicitud, hace rollback de
+// todos los efectos secundarios (elimina el movimiento ingreso del libro
+// de caja + desmarca socio del apoderado si corresponde).
+async function rollbackSolicitud(
+  id: string,
+  nuevoEstado: "rechazada" | "anulada",
+  notas?: string
+): Promise<void> {
   const supabase = await createSupabaseServerClient();
+
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select(
+      "id, apoderado_id, periodo_anio, movimiento_id, estado, notas_internas"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  const sol = solData as
+    | {
+        id: string;
+        apoderado_id: string | null;
+        periodo_anio: number;
+        movimiento_id: string | null;
+        estado: string;
+        notas_internas: string | null;
+      }
+    | null;
+  if (!sol) throw new Error("Solicitud no encontrada.");
+
+  // Si tiene movimiento asociado, eliminarlo del libro de caja.
+  if (sol.movimiento_id) {
+    const { error: movErr } = await supabase
+      .from("movimientos")
+      .delete()
+      .eq("id", sol.movimiento_id);
+    if (movErr) {
+      throw new Error(
+        `No se pudo eliminar el movimiento asociado: ${movErr.message}`
+      );
+    }
+  }
+
+  // Si el apoderado quedo marcado como socio POR esta solicitud y no hay
+  // otra solicitud activa del mismo periodo, desmarcar.
+  if (
+    sol.apoderado_id &&
+    (sol.estado === "pagada" || sol.estado === "enviada")
+  ) {
+    const { count } = await supabase
+      .from("socio_solicitudes")
+      .select("id", { count: "exact", head: true })
+      .eq("apoderado_id", sol.apoderado_id)
+      .eq("periodo_anio", sol.periodo_anio)
+      .in("estado", ["pagada", "enviada"])
+      .neq("id", id);
+    if ((count ?? 0) === 0) {
+      await supabase
+        .from("apoderados")
+        .update({ socio: false, socio_periodo: null })
+        .eq("id", sol.apoderado_id);
+    }
+  }
+
+  // Preserva notas previas y agrega el registro del rollback.
+  const timestamp = new Date().toLocaleDateString("es-CL");
+  const nuevaNota = [
+    sol.notas_internas?.trim(),
+    `[${timestamp}] ${nuevoEstado === "rechazada" ? "Rechazada" : "Anulada"} desde el admin${notas?.trim() ? `. Motivo: ${notas.trim()}` : ""}${sol.movimiento_id ? ". Movimiento asociado eliminado del libro de caja." : ""}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const { error } = await supabase
     .from("socio_solicitudes")
     .update({
-      estado: "rechazada",
-      notas_internas: notas ?? null,
+      estado: nuevoEstado,
+      notas_internas: nuevaNota || null,
+      movimiento_id: null,
     })
     .eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+export async function rechazarSolicitud(id: string, notas?: string) {
+  await requireDirectiva();
+  await rollbackSolicitud(id, "rechazada", notas);
   revalidatePath("/socios");
   revalidatePath(`/socios/${id}`);
+  revalidatePath("/apoderados");
+  revalidatePath("/movimientos");
+  revalidatePath("/cuentas");
 }
 
 // Vincula una solicitud 'pendiente_match' (creada por el flujo manual del
@@ -494,14 +572,12 @@ export async function buscarApoderadosAdmin(
 
 export async function anularSolicitud(id: string) {
   await requireDirectiva();
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
-    .from("socio_solicitudes")
-    .update({ estado: "anulada" })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await rollbackSolicitud(id, "anulada");
   revalidatePath("/socios");
   revalidatePath(`/socios/${id}`);
+  revalidatePath("/apoderados");
+  revalidatePath("/movimientos");
+  revalidatePath("/cuentas");
 }
 
 // Genera el QR del socio y lo envia por correo via Resend. Actualiza

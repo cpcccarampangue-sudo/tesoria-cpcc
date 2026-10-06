@@ -22,54 +22,40 @@ export type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda };
 
 const MAX_RESULTADOS = 10;
 
-// Busqueda flexible: email del contacto o apellido de familia/alumno.
-// Para "nombre" matchea en apoderados.nombre (rotulo "Apellido1 Apellido2"
-// del Excel del colegio) y en estudiantes.nombre. Devuelve hasta
-// MAX_RESULTADOS familias; si hay mas, pide al usuario refinar.
+// Busqueda publica de familias: SOLO por email exacto del contacto.
+// Deliberadamente NO permitimos busqueda por apellido o nombre de
+// alumno en este flujo para proteger datos personales de las familias:
+// alguien podria enumerar la lista completa escaneando apellidos.
+// La busqueda por apellido/alumno existe en el admin (/socios/nuevo)
+// donde solo accede la directiva autenticada.
 export async function buscarFamilias(
   consulta: string
 ): Promise<ResultadoBusqueda> {
   const trimmed = consulta.trim();
   if (!trimmed) {
-    throw new Error("Ingresa un correo o apellido para buscar.");
+    throw new Error("Ingresa el correo electrónico del apoderado.");
   }
 
-  const tipo: TipoBusqueda = trimmed.includes("@") && EMAIL_RE.test(trimmed) ? "email" : "nombre";
+  // Validacion estricta: solo aceptamos email con formato valido.
+  if (!EMAIL_RE.test(trimmed)) {
+    throw new Error(
+      "Ingresa un correo electrónico válido (ej. maria@ejemplo.cl). Si no sabes qué correo está registrado, usa la opción de llenado manual."
+    );
+  }
+
+  const tipo: TipoBusqueda = "email";
   const supabase = await createSupabaseServerClient();
 
-  // Set de apoderado_ids encontrados segun el criterio.
-  let apoderadoIds: string[] = [];
-
-  if (tipo === "email") {
-    const { data } = await supabase
-      .from("contactos")
-      .select("apoderado_id")
-      .ilike("email", trimmed.toLowerCase())
-      .limit(MAX_RESULTADOS + 1);
-    apoderadoIds = (data ?? [])
-      .map((r) => r.apoderado_id as string)
-      .filter(Boolean);
-  } else {
-    // tipo === "nombre": buscar en apellido de familia y en nombre de alumno
-    const [{ data: porFamilia }, { data: porAlumno }] = await Promise.all([
-      supabase
-        .from("apoderados")
-        .select("id")
-        .ilike("nombre", `%${trimmed}%`)
-        .limit(MAX_RESULTADOS + 1),
-      supabase
-        .from("estudiantes")
-        .select("apoderado_id")
-        .ilike("nombre", `%${trimmed}%`)
-        .eq("activo", true)
-        .limit(MAX_RESULTADOS + 1),
-    ]);
-    const ids = new Set<string>();
-    for (const r of porFamilia ?? []) ids.add((r as { id: string }).id);
-    for (const r of porAlumno ?? [])
-      ids.add((r as { apoderado_id: string }).apoderado_id);
-    apoderadoIds = Array.from(ids);
-  }
+  // Email exacto (case-insensitive). No usamos "like" con wildcards para
+  // evitar enumeracion.
+  const { data } = await supabase
+    .from("contactos")
+    .select("apoderado_id")
+    .ilike("email", trimmed.toLowerCase())
+    .limit(MAX_RESULTADOS + 1);
+  const apoderadoIds = (data ?? [])
+    .map((r) => r.apoderado_id as string)
+    .filter(Boolean);
 
   if (apoderadoIds.length === 0) {
     return { tipo, familias: [], hayMas: false };
@@ -78,16 +64,36 @@ export async function buscarFamilias(
   const hayMas = apoderadoIds.length > MAX_RESULTADOS;
   const idsAUsar = apoderadoIds.slice(0, MAX_RESULTADOS);
 
-  const [{ data: apoderadosData }, { data: contactosData }, { data: estudiantesData }] =
-    await Promise.all([
-      supabase.from("apoderados").select("*").in("id", idsAUsar),
-      supabase.from("contactos").select("*").in("apoderado_id", idsAUsar),
-      supabase
-        .from("estudiantes")
-        .select("*")
-        .in("apoderado_id", idsAUsar)
-        .eq("activo", true),
-    ]);
+  // Config vigente para saber el periodo activo al consultar solicitudes.
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("periodo_anio")
+    .eq("id", 1)
+    .maybeSingle();
+  const periodoVigente =
+    (cfgData as { periodo_anio: number } | null)?.periodo_anio ??
+    new Date().getFullYear();
+
+  const [
+    { data: apoderadosData },
+    { data: contactosData },
+    { data: estudiantesData },
+    { data: solicitudesData },
+  ] = await Promise.all([
+    supabase.from("apoderados").select("*").in("id", idsAUsar),
+    supabase.from("contactos").select("*").in("apoderado_id", idsAUsar),
+    supabase
+      .from("estudiantes")
+      .select("*")
+      .in("apoderado_id", idsAUsar)
+      .eq("activo", true),
+    supabase
+      .from("socio_solicitudes")
+      .select("apoderado_id, qr_token, estado")
+      .in("apoderado_id", idsAUsar)
+      .eq("periodo_anio", periodoVigente)
+      .in("estado", ["pagada", "enviada"]),
+  ]);
 
   const apoderadosMap = new Map<string, Apoderado>();
   for (const a of (apoderadosData ?? []) as Apoderado[]) {
@@ -105,6 +111,13 @@ export async function buscarFamilias(
     arr.push(e);
     estudiantesMap.set(e.apoderado_id, arr);
   }
+  const yaSocioMap = new Map<string, string>(); // apoderado_id -> qr_token
+  for (const s of (solicitudesData ?? []) as {
+    apoderado_id: string;
+    qr_token: string;
+  }[]) {
+    yaSocioMap.set(s.apoderado_id, s.qr_token);
+  }
 
   const familias: FamiliaCandidata[] = [];
   for (const id of idsAUsar) {
@@ -118,6 +131,7 @@ export async function buscarFamilias(
       estudiantes: (estudiantesMap.get(id) ?? []).sort((x, y) =>
         x.nombre.localeCompare(y.nombre)
       ),
+      yaSocioToken: yaSocioMap.get(id) ?? null,
     });
   }
 
