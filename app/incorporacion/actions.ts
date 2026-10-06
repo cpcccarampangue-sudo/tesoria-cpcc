@@ -1,8 +1,16 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  emitirCodigo,
+  verificarCodigo,
+  obtenerSesion,
+  consumirSesion,
+  OTP_CONFIG,
+} from "@/lib/otp/service";
+import { enviarOtpEmail } from "@/lib/otp/email";
 import type {
   Apoderado,
   Contacto,
@@ -207,6 +215,10 @@ export type CrearSolicitudInput = {
 // Flujo 1: la familia fue identificada en el listado, se linkea
 // directamente al apoderado_id. El monto NUNCA viene del cliente:
 // se toma siempre de socio_config en el servidor.
+//
+// REQUIERE sesion OTP valida con email == apoderado_email: previene
+// que alguien que conoce el apoderado_id y correo cree solicitudes
+// a nombre de la familia sin haber demostrado control del correo.
 export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   const key = await getRateLimitKey("incorp:crear");
   assertRateLimit(key, RL_SOLICITUD_MAX, RL_SOLICITUD_WIN_MS);
@@ -215,6 +227,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   if (!email) {
     throw new Error("El correo electrónico no es válido.");
   }
+  const sesionId = await requerirSesionOtp(email);
   if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
     throw new Error("No hay hijos vinculados para esta familia.");
   }
@@ -332,6 +345,9 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   }
 
   const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
+  // Consumimos la sesion OTP: una verificacion de correo = una
+  // incorporacion. Si quiere ingresar otra, OTP nuevo.
+  await consumirSesion(sesionId);
   await intentarRedirigirACheckout(solicitud, config, email, apoderado.nombre);
   redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
 }
@@ -368,6 +384,9 @@ export async function crearSolicitudManualSocio(
   if (!email) {
     throw new Error("El correo electrónico no es válido.");
   }
+  // REQUIERE sesion OTP valida con mismo email: el correo manual DEBE
+  // haber sido verificado antes de crear la solicitud.
+  const sesionId = await requerirSesionOtp(email);
 
   // Validacion de hijos: al menos uno, todos con nombre y curso valido.
   const hijosLimpios = (input.hijos ?? [])
@@ -452,8 +471,229 @@ export async function crearSolicitudManualSocio(
   }
 
   const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
+  // Consumimos la sesion OTP: una verificacion = una incorporacion.
+  await consumirSesion(sesionId);
   await intentarRedirigirACheckout(solicitud, config, email, nombre);
   redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
+}
+
+// ===============================================================
+// FLUJO OTP
+// ===============================================================
+// El UI nuevo va: email -> OTP -> post-verificacion -> caso A/B/C.
+// Antes de que el OTP se verifique, el servidor NO revela ningun dato
+// de la familia ni del socio. La respuesta al "solicitar codigo" es
+// siempre la misma independiente de si el email existe o no.
+
+const OTP_COOKIE = "otp_session";
+const RL_OTP_SOLICITUD_MAX = 5;
+const RL_OTP_SOLICITUD_WIN_MS = 60 * 60 * 1000; // 5/h por IP
+const RL_OTP_VERIFICAR_MAX = 20;
+const RL_OTP_VERIFICAR_WIN_MS = 60 * 60 * 1000; // 20/h por IP
+
+export type SolicitarOtpResult = {
+  // Siempre true desde el punto de vista del cliente: no revelamos si
+  // el email existe en la base o si hubo algun problema interno.
+  ok: true;
+  // Para la UX mostramos cuanto falta para poder reenviar. Si falla
+  // el reenvio minimo de 60s, el servidor devuelve el restante.
+  reintentarEnSeg?: number;
+};
+
+// Paso 1 publico: emite y envia un OTP al correo. SIEMPRE responde
+// "ok" al cliente para no permitir enumeracion. Internamente:
+//   - rate limit por IP (5/h) y por correo (3/15min via service).
+//   - minimo 60s entre reenvios para el mismo correo.
+//   - invalida codigos previos del mismo correo.
+//   - loggea sin PII (solo correo enmascarado y resultado).
+export async function solicitarOtp(email: string): Promise<SolicitarOtpResult> {
+  const h = await headers();
+  const ip = clientIp(h);
+
+  // Rate limit por IP: le pega al atacante que generaria muchos correos
+  // distintos. El limite por correo se aplica dentro de emitirCodigo.
+  const r = rateLimit(
+    `otp:solicitar:${ip}`,
+    RL_OTP_SOLICITUD_MAX,
+    RL_OTP_SOLICITUD_WIN_MS
+  );
+  if (!r.ok) {
+    // No revelamos "demasiados intentos" como texto distinto porque eso
+    // seria enumeracion por respuesta. Devolvemos ok con reintentar.
+    return { ok: true, reintentarEnSeg: r.retryAfterSeconds ?? 60 };
+  }
+
+  const emailNorm = normalizarEmail(email);
+  if (!emailNorm) {
+    // Formato invalido. Igual devolvemos ok (el formulario del cliente
+    // ya valida formato; si llega aqui con basura, no revelamos nada).
+    return { ok: true };
+  }
+
+  const emisor = await emitirCodigo(emailNorm, ip);
+  if (!emisor.ok) {
+    // Reenvio muy rapido o limite por correo. Para el cliente, igual
+    // "ok" + segundos restantes si aplica.
+    if (emisor.motivo === "reenvio_muy_rapido") {
+      return { ok: true, reintentarEnSeg: emisor.segundosRestantes };
+    }
+    // limite_por_correo: devolvemos ok sin segundos para que el UI
+    // ofrezca "cambiar correo". Loggeamos para auditoria.
+    console.warn(
+      "[otp] limite_por_correo",
+      `email=${enmascararEmailLog(emailNorm)}`
+    );
+    return { ok: true };
+  }
+
+  try {
+    await enviarOtpEmail(emailNorm, emisor.codigo);
+  } catch (err) {
+    // El codigo quedo creado en DB; si Resend falla, el usuario puede
+    // reenviar. Loggeamos sin PII.
+    const code = err instanceof Error ? err.name : "unknown";
+    console.error("[otp] enviar email fallo:", code);
+  }
+
+  console.log(
+    "[otp] solicitud",
+    `email=${enmascararEmailLog(emailNorm)} ip=${ip} ok`
+  );
+  return { ok: true };
+}
+
+export type VerificarOtpResult =
+  | { ok: true }
+  | { ok: false; motivo: "codigo_invalido" | "codigo_expirado" | "max_intentos" };
+
+// Paso 2 publico: valida el codigo. Si OK, crea sesion y setea cookie
+// HttpOnly / Secure / SameSite=Lax de 30 min.
+export async function verificarOtp(
+  email: string,
+  codigo: string
+): Promise<VerificarOtpResult> {
+  const h = await headers();
+  const ip = clientIp(h);
+
+  const r = rateLimit(
+    `otp:verificar:${ip}`,
+    RL_OTP_VERIFICAR_MAX,
+    RL_OTP_VERIFICAR_WIN_MS
+  );
+  if (!r.ok) {
+    return { ok: false, motivo: "max_intentos" };
+  }
+
+  const emailNorm = normalizarEmail(email);
+  const codigoLimpio = (codigo ?? "").replace(/\D/g, "").slice(0, 6);
+  if (!emailNorm || codigoLimpio.length !== 6) {
+    return { ok: false, motivo: "codigo_invalido" };
+  }
+
+  const res = await verificarCodigo(emailNorm, codigoLimpio, ip);
+  if (!res.ok) {
+    console.log(
+      "[otp] verificar",
+      `email=${enmascararEmailLog(emailNorm)} ip=${ip} motivo=${res.motivo}`
+    );
+    return res;
+  }
+
+  // Setear cookie segura. Max-Age en segundos.
+  const c = await cookies();
+  c.set(OTP_COOKIE, res.sesionId, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: OTP_CONFIG.SESION_TTL_MIN * 60,
+  });
+
+  console.log(
+    "[otp] verificar",
+    `email=${enmascararEmailLog(emailNorm)} ip=${ip} ok`
+  );
+  return { ok: true };
+}
+
+export type EstadoPostOtp =
+  | { caso: "sin_sesion" }
+  | { caso: "ya_socio"; qrToken: string }
+  | {
+      caso: "familia_existente";
+      email: string;
+      apoderadoId: string;
+      apoderadoNombre: string;
+      estudiantes: Array<{ id: string; nombre: string; curso: string | null }>;
+    }
+  | { caso: "nuevo"; email: string };
+
+// Paso 3: solo despues de verificar el OTP el cliente llama esto para
+// saber que mostrar. El dato de "existe o no" solo se revela aqui, con
+// cookie valida; antes no.
+export async function estadoPostOtp(): Promise<EstadoPostOtp> {
+  const c = await cookies();
+  const sid = c.get(OTP_COOKIE)?.value;
+  if (!sid) return { caso: "sin_sesion" };
+  const sesion = await obtenerSesion(sid);
+  if (!sesion) return { caso: "sin_sesion" };
+
+  const familia = await resolverFamiliaPorEmail(sesion.email);
+  if (!familia) {
+    return { caso: "nuevo", email: sesion.email };
+  }
+
+  if (familia.yaSocioToken) {
+    return { caso: "ya_socio", qrToken: familia.yaSocioToken };
+  }
+
+  return {
+    caso: "familia_existente",
+    email: sesion.email,
+    apoderadoId: familia.apoderado.id,
+    apoderadoNombre: familia.apoderado.nombre,
+    estudiantes: familia.estudiantes.map((e) => ({
+      id: e.id,
+      nombre: e.nombre,
+      curso: e.curso ?? null,
+    })),
+  };
+}
+
+// Helper interno: valida que la cookie OTP corresponde a un email
+// verificado y que ese email coincide con el que viene del cliente.
+// Lanza con mensaje generico si no.
+async function requerirSesionOtp(email: string): Promise<string> {
+  const c = await cookies();
+  const sid = c.get(OTP_COOKIE)?.value;
+  if (!sid) throw new Error("Tu sesión expiró. Vuelve a ingresar el código.");
+  const sesion = await obtenerSesion(sid);
+  if (!sesion) {
+    throw new Error("Tu sesión expiró. Vuelve a ingresar el código.");
+  }
+  if (sesion.email !== normalizarEmail(email)) {
+    // No decimos "no coincide" para no filtrar informacion; si el
+    // cliente trato de usar la sesion con otro correo, es sospechoso.
+    throw new Error("Tu sesión expiró. Vuelve a ingresar el código.");
+  }
+  return sesion.id;
+}
+
+export async function cerrarSesionOtp(): Promise<void> {
+  const c = await cookies();
+  c.delete(OTP_COOKIE);
+}
+
+// Enmascara un email para logs: pamela.rodriguez@gmail.com -> p******@g****.com
+function enmascararEmailLog(email: string): string {
+  const at = email.indexOf("@");
+  if (at < 1) return "***";
+  const local = email.slice(0, at);
+  const dom = email.slice(at + 1);
+  const dotDom = dom.indexOf(".");
+  const dom1 = dotDom > 0 ? dom.slice(0, dotDom) : dom;
+  const dom2 = dotDom > 0 ? dom.slice(dotDom) : "";
+  return `${local[0]}***@${dom1[0]}***${dom2}`;
 }
 
 // Helper interno: crea checkout SumUp (si esta configurado) y guarda
