@@ -1,14 +1,47 @@
 // Endpoint publico para validar un QR de socio desde el PWA /validar.
 // Responde JSON con el estado del socio: activo o no_valido con motivo.
-// No requiere autenticacion (el token del QR actua como auth).
+// No requiere autenticacion (el token del QR actua como auth): el token
+// es un UUID v4 (gen_random_uuid, 122 bits de entropia) y es
+// impredecible/opaco.
+//
+// Hardening:
+//   - rate limit por IP para evitar que un atacante enumere tokens.
+//   - respuesta minimizada: solo lo necesario para validar visualmente.
+//   - mensajes de error que NO distinguen entre "no existe" y "mal formato"
+//     cuando no es util para el validador.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Estudiante, SocioConfig, SocioSolicitud } from "@/lib/types";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+const UUID_V4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Permitimos escaneos rapidos consecutivos en eventos reales (una
+// persona de la directiva puede escanear 1 QR cada 2-3 segundos), pero
+// cerramos la puerta a enumeracion masiva.
+const RL_MAX = 60;
+const RL_WIN_MS = 60 * 1000;
+
 export async function GET(req: NextRequest) {
+  const ip = clientIp(req.headers);
+  const r = rateLimit(`validar:${ip}`, RL_MAX, RL_WIN_MS);
+  if (!r.ok) {
+    return NextResponse.json(
+      {
+        estado: "no_valido",
+        motivo: `Demasiados intentos. Espera ${r.retryAfterSeconds} segundos.`,
+      },
+      {
+        status: 429,
+        headers: { "Retry-After": String(r.retryAfterSeconds ?? 60) },
+      }
+    );
+  }
+
   const token = req.nextUrl.searchParams.get("token")?.trim();
   if (!token) {
     return NextResponse.json(
@@ -17,9 +50,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Validar que el token tiene forma de UUID.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!UUID_RE.test(token)) {
+  // Validamos forma estricta de UUID v4. Rechazamos pre-consulta para
+  // no gastar queries en basura y para no distinguir en el tiempo entre
+  // "mal formato" y "token inexistente".
+  if (!UUID_V4_RE.test(token)) {
     return NextResponse.json({
       estado: "no_valido",
       motivo: "Este QR no corresponde a un socio del CdP.",
@@ -30,7 +64,9 @@ export async function GET(req: NextRequest) {
   const [{ data: solData }, { data: cfgData }] = await Promise.all([
     supabase
       .from("socio_solicitudes")
-      .select("*")
+      .select(
+        "id, apoderado_id, apoderado_nombre, alumno_nombre, curso, estado, periodo_anio, pagada_en"
+      )
       .eq("qr_token", token)
       .maybeSingle(),
     supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
@@ -112,6 +148,9 @@ export async function GET(req: NextRequest) {
     hijos = [{ nombre: solicitud.alumno_nombre, curso: solicitud.curso }];
   }
 
+  // Respuesta minimizada: solo lo que el validador necesita para
+  // contrastar visualmente la identidad del portador del QR. No
+  // devolvemos email, telefono, RUT ni monto pagado.
   return NextResponse.json({
     estado: "activo",
     apoderado: solicitud.apoderado_nombre,

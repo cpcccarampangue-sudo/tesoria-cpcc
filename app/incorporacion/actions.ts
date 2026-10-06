@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
@@ -12,15 +13,40 @@ import type {
 import { crearCheckout, sumupHabilitado } from "@/lib/sumup/client";
 import { siteUrl } from "@/lib/qr";
 import { todosLosCursos } from "@/lib/cursos";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Reexportamos desde el helper no-server para que la UI pueda importar
-// detectarTipoBusqueda sin problemas de "use server".
+// detectarTipoBusqueda y los masks sin problemas de "use server".
 import type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda } from "./tipos";
+import { maskEmail, maskNombre } from "./tipos";
 export type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda };
 
-const MAX_RESULTADOS = 10;
+const MAX_RESULTADOS = 5;
+
+// Rate limits para endpoints publicos. Pensados para prevenir enumeracion
+// masiva: un atacante no deberia poder barrer miles de correos para
+// descubrir cuales son socios. Un apoderado real raras veces hace mas
+// de 2-3 busquedas por sesion.
+const RL_BUSQUEDA_MAX = 8;
+const RL_BUSQUEDA_WIN_MS = 10 * 60 * 1000; // 8 en 10 min por IP
+const RL_SOLICITUD_MAX = 5;
+const RL_SOLICITUD_WIN_MS = 60 * 60 * 1000; // 5 en 1 hora por IP
+
+async function getRateLimitKey(sufijo: string): Promise<string> {
+  const h = await headers();
+  return `${sufijo}:${clientIp(h)}`;
+}
+
+function assertRateLimit(key: string, max: number, windowMs: number) {
+  const r = rateLimit(key, max, windowMs);
+  if (!r.ok) {
+    throw new Error(
+      `Demasiados intentos. Vuelve a intentar en ${r.retryAfterSeconds} segundos.`
+    );
+  }
+}
 
 // Busqueda publica de familias: SOLO por email exacto del contacto.
 // Deliberadamente NO permitimos busqueda por apellido o nombre de
@@ -36,26 +62,36 @@ export async function buscarFamilias(
     throw new Error("Ingresa el correo electrónico del apoderado.");
   }
 
-  // Validacion estricta: solo aceptamos email con formato valido.
+  // Validacion estricta: solo aceptamos email con formato valido. El
+  // mensaje aqui no revela si el correo existe en la base: solo valida
+  // formato.
   if (!EMAIL_RE.test(trimmed)) {
     throw new Error(
-      "Ingresa un correo electrónico válido (ej. maria@ejemplo.cl). Si no sabes qué correo está registrado, usa la opción de llenado manual."
+      "Ingresa un correo electrónico válido (ej. maria@ejemplo.cl)."
     );
   }
+
+  // Rate limit por IP: previene enumeracion masiva. La respuesta del
+  // endpoint intencionalmente NO distingue entre "sin coincidencias"
+  // y "familia encontrada": en ambos casos el formulario cliente
+  // avanza al paso siguiente. Esto reduce el valor de barrer correos.
+  const key = await getRateLimitKey("incorp:buscar");
+  assertRateLimit(key, RL_BUSQUEDA_MAX, RL_BUSQUEDA_WIN_MS);
 
   const tipo: TipoBusqueda = "email";
   const supabase = await createSupabaseServerClient();
 
-  // Email exacto (case-insensitive). No usamos "like" con wildcards para
-  // evitar enumeracion.
+  // Email exacto (case-insensitive). No usamos "like" con wildcards.
   const { data } = await supabase
     .from("contactos")
     .select("apoderado_id")
     .ilike("email", trimmed.toLowerCase())
     .limit(MAX_RESULTADOS + 1);
-  const apoderadoIds = (data ?? [])
-    .map((r) => r.apoderado_id as string)
-    .filter(Boolean);
+  const apoderadoIds = Array.from(
+    new Set((data ?? [])
+      .map((r) => r.apoderado_id as string)
+      .filter(Boolean))
+  );
 
   if (apoderadoIds.length === 0) {
     return { tipo, familias: [], hayMas: false };
@@ -80,11 +116,14 @@ export async function buscarFamilias(
     { data: estudiantesData },
     { data: solicitudesData },
   ] = await Promise.all([
-    supabase.from("apoderados").select("*").in("id", idsAUsar),
-    supabase.from("contactos").select("*").in("apoderado_id", idsAUsar),
+    supabase.from("apoderados").select("id, nombre").in("id", idsAUsar),
+    supabase
+      .from("contactos")
+      .select("apoderado_id, email, nombre")
+      .in("apoderado_id", idsAUsar),
     supabase
       .from("estudiantes")
-      .select("*")
+      .select("id, apoderado_id, nombre, curso")
       .in("apoderado_id", idsAUsar)
       .eq("activo", true),
     supabase
@@ -95,8 +134,8 @@ export async function buscarFamilias(
       .in("estado", ["pagada", "enviada"]),
   ]);
 
-  const apoderadosMap = new Map<string, Apoderado>();
-  for (const a of (apoderadosData ?? []) as Apoderado[]) {
+  const apoderadosMap = new Map<string, { id: string; nombre: string }>();
+  for (const a of (apoderadosData ?? []) as { id: string; nombre: string }[]) {
     apoderadosMap.set(a.id, a);
   }
   const contactosMap = new Map<string, Contacto[]>();
@@ -123,14 +162,23 @@ export async function buscarFamilias(
   for (const id of idsAUsar) {
     const a = apoderadosMap.get(id);
     if (!a) continue;
+    const contactosOrdenados = (contactosMap.get(id) ?? []).sort((x, y) =>
+      (x.nombre ?? "").localeCompare(y.nombre ?? "")
+    );
+    const estudiantesOrdenados = (estudiantesMap.get(id) ?? []).sort((x, y) =>
+      x.nombre.localeCompare(y.nombre)
+    );
     familias.push({
-      apoderado: a,
-      contactos: (contactosMap.get(id) ?? []).sort((x, y) =>
-        x.nombre.localeCompare(y.nombre)
-      ),
-      estudiantes: (estudiantesMap.get(id) ?? []).sort((x, y) =>
-        x.nombre.localeCompare(y.nombre)
-      ),
+      apoderadoId: a.id,
+      apoderadoNombreMask: maskNombre(a.nombre ?? ""),
+      contactosMask: contactosOrdenados
+        .filter((c) => c.email)
+        .map((c) => ({ emailMask: maskEmail(c.email as string) })),
+      estudiantes: estudiantesOrdenados.map((e) => ({
+        id: e.id,
+        nombreMask: maskNombre(e.nombre),
+        curso: e.curso ?? null,
+      })),
       yaSocioToken: yaSocioMap.get(id) ?? null,
     });
   }
@@ -146,14 +194,18 @@ export type CrearSolicitudInput = {
 };
 
 // Flujo 1: la familia fue identificada en el listado, se linkea
-// directamente al apoderado_id.
+// directamente al apoderado_id. El monto NUNCA viene del cliente:
+// se toma siempre de socio_config en el servidor.
 export async function crearSolicitudSocio(input: CrearSolicitudInput) {
+  const key = await getRateLimitKey("incorp:crear");
+  assertRateLimit(key, RL_SOLICITUD_MAX, RL_SOLICITUD_WIN_MS);
+
   const email = input.apoderado_email.trim().toLowerCase();
   if (!EMAIL_RE.test(email)) {
     throw new Error("El correo electrónico no es válido.");
   }
   if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
-    throw new Error("Selecciona al menos un hijo para incluir en el QR.");
+    throw new Error("No hay hijos vinculados para esta familia.");
   }
 
   const supabase = await createSupabaseServerClient();
@@ -165,7 +217,8 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
     .maybeSingle();
   const apoderado = apoderadoData as Apoderado | null;
   if (!apoderado) {
-    throw new Error("Familia no encontrada. Vuelve a buscar.");
+    // Mensaje generico: no revela si el ID existe o no.
+    throw new Error("No pudimos continuar con tu solicitud. Vuelve a buscar.");
   }
 
   const { data: estudiantesData } = await supabase
@@ -175,7 +228,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
     .in("id", input.estudiante_ids);
   const estudiantes = (estudiantesData as Estudiante[] | null) ?? [];
   if (estudiantes.length === 0) {
-    throw new Error("Los hijos seleccionados no corresponden a esta familia.");
+    throw new Error("No pudimos continuar con tu solicitud. Vuelve a buscar.");
   }
 
   const { data: cfgData } = await supabase
@@ -236,12 +289,9 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       .limit(1)
       .maybeSingle();
     if (pendienteManual) {
-      const otra = pendienteManual as {
-        qr_token: string;
-        apoderado_email: string;
-      };
+      // No revelamos el correo registrado, solo que hay actividad previa.
       throw new Error(
-        `Ya hay una solicitud activa de esta familia enviada desde el correo "${otra.apoderado_email}". Contacta a la directiva para que la verifiquen antes de continuar.`
+        `Ya hay una solicitud activa de esta familia. Contacta a la directiva para que la verifiquen antes de continuar.`
       );
     }
   }
@@ -259,15 +309,15 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       apoderado_telefono: input.apoderado_telefono?.trim() || null,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
+      // Monto SIEMPRE del servidor, nunca del cliente.
       monto_cuota: config.monto_cuota,
     })
     .select("id, qr_token")
     .single();
 
   if (error || !nueva) {
-    throw new Error(
-      error?.message ?? "No se pudo crear la solicitud. Intenta de nuevo."
-    );
+    console.error("[incorporacion] insert solicitud fallo:", error?.code);
+    throw new Error("No se pudo crear la solicitud. Intenta de nuevo.");
   }
 
   const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
@@ -295,6 +345,9 @@ export type CrearSolicitudManualInput = {
 export async function crearSolicitudManualSocio(
   input: CrearSolicitudManualInput
 ) {
+  const key = await getRateLimitKey("incorp:crear");
+  assertRateLimit(key, RL_SOLICITUD_MAX, RL_SOLICITUD_WIN_MS);
+
   const email = input.apoderado_email.trim().toLowerCase();
   const nombre = input.apoderado_nombre.trim();
 
@@ -375,6 +428,7 @@ export async function crearSolicitudManualSocio(
       apoderado_telefono: input.apoderado_telefono?.trim() || null,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
+      // Monto SIEMPRE del servidor.
       monto_cuota: config.monto_cuota,
       estado: "pendiente_match",
     })
@@ -382,9 +436,8 @@ export async function crearSolicitudManualSocio(
     .single();
 
   if (error || !nueva) {
-    throw new Error(
-      error?.message ?? "No se pudo crear la solicitud. Intenta de nuevo."
-    );
+    console.error("[incorporacion-manual] insert solicitud fallo:", error?.code);
+    throw new Error("No se pudo crear la solicitud. Intenta de nuevo.");
   }
 
   const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
@@ -422,10 +475,10 @@ async function intentarRedirigirACheckout(
       urlSumUp = checkout.checkout_url;
     }
   } catch (err) {
-    console.error(
-      "[incorporacion] SumUp crearCheckout fallo:",
-      err instanceof Error ? err.message : err
-    );
+    // Log sin PII, solo codigo de error si existe. El mensaje completo
+    // puede traer datos del checkout o del email.
+    const code = err instanceof Error ? err.name : "unknown";
+    console.error("[incorporacion] SumUp crearCheckout fallo:", code);
   }
   if (urlSumUp) {
     redirect(urlSumUp);

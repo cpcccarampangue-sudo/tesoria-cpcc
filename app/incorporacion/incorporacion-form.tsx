@@ -9,7 +9,6 @@ import {
   crearSolicitudManualSocio,
 } from "./actions";
 import {
-  detectarTipoBusqueda,
   type FamiliaCandidata,
   type ResultadoBusqueda,
 } from "./tipos";
@@ -21,6 +20,8 @@ type Paso =
   | { nombre: "ya_socio"; familia: FamiliaCandidata; qrToken: string }
   | { nombre: "manual"; consulta: string };
 
+// Server actions con redirect(...) lanzan un error especial de Next.js
+// con digest "NEXT_REDIRECT". No debemos tratarlo como error de usuario.
 function esRedirect(err: unknown): boolean {
   return (
     err instanceof Error &&
@@ -50,13 +51,6 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     { nombre: "", curso: "" },
   ]);
 
-  function hintTipo(input: string) {
-    if (!input.trim()) return "Ingresa tu correo electrónico registrado.";
-    const t = detectarTipoBusqueda(input);
-    if (t === "email") return "Buscando por correo…";
-    return "Debe ser un correo electrónico válido.";
-  }
-
   function manejarBusqueda(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -64,25 +58,17 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       try {
         const resultado = await buscarFamilias(consulta);
         if (resultado.familias.length === 0) {
-          // No se encontro: ofrecer flujo manual con la consulta inicial.
+          // No se encontro: ofrecer flujo manual con el correo que ingreso.
           setPaso({ nombre: "manual", consulta });
-          // Pre-llenar correo si lo que buscó es un correo; si fue un
-          // nombre, lo dejamos como pista en el nombre del apoderado.
-          if (resultado.tipo === "email") {
-            setManual((m) => ({ ...m, apoderado_email: consulta.trim() }));
-          } else {
-            setManual((m) => ({ ...m, apoderado_nombre: consulta.trim() }));
-          }
-          // Reset de hijos al llegar al flujo manual
+          setManual((m) => ({ ...m, apoderado_email: consulta.trim() }));
           setHijos([{ nombre: "", curso: "" }]);
           return;
         }
         if (resultado.familias.length === 1) {
-          // Única coincidencia: pasar directo a confirmar.
+          // Unica coincidencia: pasar directo a confirmar.
           elegirFamilia(resultado.familias[0]);
           return;
         }
-        // Múltiples: pedir que elija.
         setPaso({ nombre: "elegir", resultado, consulta });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error.");
@@ -102,22 +88,20 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       return;
     }
     setPaso({ nombre: "confirmar", familia });
-    // Pre-llenar email con uno de los contactos (el primero que tenga email).
-    const emailContacto = familia.contactos.find((c) => c.email)?.email ?? "";
-    setEmail(emailContacto);
+    // Pre-llenamos el email con el correo que uso para buscar: ya es suyo.
+    setEmail(consulta.trim());
   }
 
   function confirmarPago(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (paso.nombre !== "confirmar") return;
-    // Usar siempre TODOS los hijos activos de la familia (la cuota es por
-    // familia, no por hijo). El checkbox desaparecio para simplificar.
+    // Usar siempre TODOS los hijos activos: cuota es por familia.
     const todosLosHijosIds = paso.familia.estudiantes.map((e) => e.id);
     startTransition(async () => {
       try {
         await crearSolicitudSocio({
-          apoderado_id: paso.familia.apoderado.id,
+          apoderado_id: paso.familia.apoderadoId,
           apoderado_email: email,
           apoderado_telefono: telefono,
           estudiante_ids: todosLosHijosIds,
@@ -164,40 +148,52 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
 
   if (paso.nombre === "buscar") {
     return (
-      <form onSubmit={manejarBusqueda} className="space-y-3">
+      <form onSubmit={manejarBusqueda} className="space-y-5">
         <div>
-          <label className="label">Encuentra tu familia</label>
+          <label
+            htmlFor="busqueda-correo"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
+            Correo electrónico registrado
+          </label>
           <input
+            id="busqueda-correo"
             type="email"
-            className="input"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             value={consulta}
             onChange={(e) => setConsulta(e.target.value)}
             placeholder="correo@ejemplo.cl"
             required
             autoComplete="email"
+            inputMode="email"
           />
-          <p className="text-xs text-slate-500 mt-1">{hintTipo(consulta)}</p>
+          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+            Usa el correo con que te registraste en el colegio. Si no coincide
+            con nuestros registros, podrás continuar con un formulario de
+            incorporación manual.
+          </p>
         </div>
 
         {error && (
-          <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
+          <div
+            role="alert"
+            className="text-sm bg-red-50 text-red-800 rounded-lg p-3 border border-red-200"
+          >
             {error}
           </div>
         )}
 
         <button
           type="submit"
-          className="btn-primary w-full"
+          className="w-full h-[54px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
           disabled={pending}
         >
-          {pending ? "Buscando..." : "Buscar mi familia →"}
+          {pending ? "Buscando…" : "Continuar"}
         </button>
 
-        <p className="text-xs text-slate-500 text-center pt-2">
-          Usa el correo electrónico que tienes registrado en matrícula. Por
-          seguridad de las familias, el formulario público no permite
-          buscar por apellido o nombre del alumno. Si no sabes qué correo
-          está registrado, usa la opción manual.
+        <p className="text-xs text-slate-500 text-center leading-relaxed">
+          Por protección de datos, el formulario público no permite buscar
+          por nombre, apellido o alumno.
         </p>
       </form>
     );
@@ -205,37 +201,38 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
 
   if (paso.nombre === "elegir") {
     return (
-      <div className="space-y-3">
-        <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+      <div className="space-y-4">
+        <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
           Encontramos <strong>{paso.resultado.familias.length}</strong>{" "}
-          familia(s) con &quot;{paso.consulta}&quot;. Elige la tuya:
+          familia(s) asociadas a este correo. Selecciona la tuya.
         </div>
 
         <div className="space-y-2">
           {paso.resultado.familias.map((f) => (
             <button
-              key={f.apoderado.id}
+              key={f.apoderadoId}
               type="button"
-              className="w-full text-left p-3 border border-slate-200 rounded-md hover:border-brand-500 hover:bg-brand-50"
+              className="w-full text-left p-3.5 border border-slate-200 rounded-xl hover:border-brand-500 hover:bg-brand-50 transition-colors"
               onClick={() => elegirFamilia(f)}
             >
-              <div className="font-medium">{f.apoderado.nombre}</div>
+              <div className="font-medium text-slate-900">
+                {f.apoderadoNombreMask}
+              </div>
               <div className="text-xs text-slate-600 mt-1">
                 {f.estudiantes.length === 0 ? (
                   <em>sin alumnos activos</em>
                 ) : (
                   f.estudiantes
-                    .map((e) => `${e.nombre}${e.curso ? ` (${e.curso})` : ""}`)
+                    .map(
+                      (e) =>
+                        `${e.nombreMask}${e.curso ? ` · ${e.curso}` : ""}`
+                    )
                     .join(" · ")
                 )}
               </div>
-              {f.contactos.some((c) => c.email) && (
+              {f.contactosMask.length > 0 && (
                 <div className="text-xs text-slate-400 mt-1">
-                  Contactos:{" "}
-                  {f.contactos
-                    .filter((c) => c.email)
-                    .map((c) => c.email)
-                    .join(", ")}
+                  Contactos: {f.contactosMask.map((c) => c.emailMask).join(", ")}
                 </div>
               )}
             </button>
@@ -244,17 +241,17 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
 
         {paso.resultado.hayMas && (
           <div className="text-xs text-amber-700">
-            Hay más de 10 coincidencias. Vuelve atrás y busca con un dato más
-            específico (correo o RUT).
+            Hay más coincidencias. Si no reconoces tu familia, verifica el
+            correo que ingresaste.
           </div>
         )}
 
         <button
           type="button"
-          className="btn-secondary w-full"
+          className="w-full h-[48px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
           onClick={() => setPaso({ nombre: "buscar" })}
         >
-          ← Volver a buscar
+          Volver
         </button>
       </div>
     );
@@ -266,15 +263,30 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     const urlPublica = `${siteUrl}/socio/${paso.qrToken}`;
     return (
       <div className="space-y-4">
-        <div className="rounded-md bg-green-50 border-2 border-green-500 p-4 text-center space-y-2">
-          <div className="text-5xl">✅</div>
-          <div className="text-lg font-bold text-green-900">
-            Ya eres socio activo
+        <div className="rounded-2xl bg-green-50 border border-green-200 p-5 text-center space-y-2">
+          <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+            <svg
+              className="w-7 h-7 text-green-700"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.4}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+          </div>
+          <div className="text-lg font-semibold text-green-900">
+            Ya figura como socio activo
           </div>
           <p className="text-sm text-green-800">
-            La familia <strong>{paso.familia.apoderado.nombre}</strong> ya
-            figura como socia activa del período vigente. No necesitas
-            pagar de nuevo.
+            La familia <strong>{paso.familia.apoderadoNombreMask}</strong>{" "}
+            tiene su cuota al día para el período vigente. No necesitas pagar
+            de nuevo.
           </p>
         </div>
 
@@ -282,27 +294,25 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           href={urlPublica}
           target="_blank"
           rel="noopener noreferrer"
-          className="btn-primary w-full text-center"
+          className="w-full h-[54px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-colors flex items-center justify-center"
         >
-          Ver mi QR de socio →
+          Ver mi QR de socio
         </a>
 
-        <div className="text-xs text-slate-500 text-center">
-          <p>
-            Si quieres el QR en tu correo, contacta a la tesorería del CdP
-            para que te lo reenvíe.
-          </p>
-        </div>
+        <p className="text-xs text-slate-500 text-center">
+          Si quieres recibir el QR por correo, contacta a la tesorería del
+          Centro de Padres.
+        </p>
 
         <button
           type="button"
-          className="btn-secondary w-full"
+          className="w-full h-[48px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
           onClick={() => {
             setPaso({ nombre: "buscar" });
             setConsulta("");
           }}
         >
-          ← Volver
+          Volver al inicio
         </button>
       </div>
     );
@@ -313,38 +323,48 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     const totalHijos = familia.estudiantes.length;
     return (
       <form onSubmit={confirmarPago} className="space-y-4">
-        <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-900">
+        <div className="rounded-xl bg-green-50 border border-green-200 p-3 text-sm text-green-900">
           <strong>¡Te encontramos!</strong> Confirma los datos de tu familia
           antes de continuar al pago.
         </div>
 
         <div>
-          <label className="label">Familia</label>
-          <div className="input bg-slate-50 cursor-not-allowed">
-            {familia.apoderado.nombre}
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            Familia
+          </label>
+          <div className="w-full h-[52px] px-4 rounded-xl border border-slate-200 bg-slate-50 text-sm text-slate-800 flex items-center">
+            {familia.apoderadoNombreMask}
           </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Mostramos los datos parcialmente para proteger la información
+            de las familias.
+          </p>
         </div>
 
         {familia.estudiantes.length === 0 ? (
-          <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+          <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
             No encontramos alumnos activos en tu familia. Contacta a la
             tesorería para completar los datos antes de incorporarte como
             socio.
           </div>
         ) : (
           <div>
-            <label className="label">Hijos que quedarán en el QR</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Hijos cubiertos por este QR
+            </label>
             <p className="text-xs text-slate-500 mb-2">
               La cuota es por familia; el QR cubre a todos tus hijos
               matriculados.
             </p>
-            <ul className="space-y-1">
+            <ul className="space-y-1.5">
               {familia.estudiantes.map((est) => (
                 <li
                   key={est.id}
-                  className="p-2 rounded-md border border-slate-200 bg-slate-50"
+                  className="p-3 rounded-xl border border-slate-200 bg-slate-50"
                 >
-                  <div className="font-medium text-sm">{est.nombre}</div>
+                  <div className="font-medium text-sm text-slate-900">
+                    {est.nombreMask}
+                  </div>
                   <div className="text-xs text-slate-500">
                     {est.curso ?? "— sin curso —"}
                   </div>
@@ -355,50 +375,64 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         )}
 
         <div>
-          <label className="label">Correo de contacto</label>
+          <label
+            htmlFor="confirmar-email"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
+            Correo donde recibir el QR
+          </label>
           <input
+            id="confirmar-email"
             type="email"
-            className="input"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="correo@ejemplo.cl"
             required
             autoComplete="email"
+            inputMode="email"
           />
-          <p className="text-xs text-slate-500 mt-1">
-            Aquí llegará tu QR cuando confirmemos el pago.
-          </p>
         </div>
 
         <div>
-          <label className="label">
+          <label
+            htmlFor="confirmar-tel"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
             Teléfono{" "}
             <span className="text-xs text-slate-500 font-normal">
               (opcional)
             </span>
           </label>
           <input
-            className="input"
+            id="confirmar-tel"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             value={telefono}
             onChange={(e) => setTelefono(e.target.value)}
             placeholder="+56 9 1234 5678"
             autoComplete="tel"
+            inputMode="tel"
           />
         </div>
 
-        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-          <strong>Monto a pagar:</strong> $
-          {config.monto_cuota.toLocaleString("es-CL")} CLP · Socio{" "}
-          {config.periodo_anio}
-          <div className="text-xs mt-1">
-            Cubre {totalHijos} hijo
-            {totalHijos !== 1 ? "s" : ""} de la familia{" "}
-            {familia.apoderado.nombre}.
+        <div className="rounded-xl bg-brand-50 border border-brand-200 p-4">
+          <div className="text-xs text-slate-600 uppercase tracking-wider font-medium">
+            Monto a pagar
+          </div>
+          <div className="text-2xl font-semibold text-brand-900 mt-0.5">
+            ${config.monto_cuota.toLocaleString("es-CL")} CLP
+          </div>
+          <div className="text-xs text-slate-600 mt-1">
+            Cuota socio {config.periodo_anio} — cubre {totalHijos} hijo
+            {totalHijos !== 1 ? "s" : ""}.
           </div>
         </div>
 
         {error && (
-          <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
+          <div
+            role="alert"
+            className="text-sm bg-red-50 text-red-800 rounded-lg p-3 border border-red-200"
+          >
             {error}
           </div>
         )}
@@ -406,17 +440,17 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         <div className="flex gap-2">
           <button
             type="button"
-            className="btn-secondary"
+            className="h-[52px] px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
             onClick={() => setPaso({ nombre: "buscar" })}
           >
-            ← Volver
+            Volver
           </button>
           <button
             type="submit"
-            className="btn-primary flex-1"
+            className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
             disabled={pending || totalHijos === 0}
           >
-            {pending ? "Procesando..." : "Confirmar y pagar →"}
+            {pending ? "Procesando…" : "Confirmar y pagar"}
           </button>
         </div>
       </form>
@@ -425,17 +459,23 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
 
   // paso.nombre === "manual"
   return (
-    <form onSubmit={enviarManual} className="space-y-3">
-      <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-        <strong>No encontramos tu familia</strong> con los datos
-        &quot;{paso.consulta}&quot;. Llena este formulario y la directiva
-        verificará tus datos antes de activar tu condición de socio.
+    <form onSubmit={enviarManual} className="space-y-4">
+      <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+        No pudimos vincular tu correo con una familia registrada. Completa
+        tus datos y la directiva verificará y vinculará tu solicitud antes
+        de confirmar la membresía.
       </div>
 
       <div>
-        <label className="label">Nombre del apoderado</label>
+        <label
+          htmlFor="m-nombre"
+          className="block text-sm font-medium text-slate-700 mb-1.5"
+        >
+          Nombre del apoderado
+        </label>
         <input
-          className="input"
+          id="m-nombre"
+          className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
           value={manual.apoderado_nombre}
           onChange={(e) =>
             setManual((m) => ({ ...m, apoderado_nombre: e.target.value }))
@@ -447,10 +487,16 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="label">Correo electrónico</label>
+          <label
+            htmlFor="m-email"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
+            Correo electrónico
+          </label>
           <input
+            id="m-email"
             type="email"
-            className="input"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             value={manual.apoderado_email}
             onChange={(e) =>
               setManual((m) => ({ ...m, apoderado_email: e.target.value }))
@@ -458,17 +504,22 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
             placeholder="correo@ejemplo.cl"
             required
             autoComplete="email"
+            inputMode="email"
           />
         </div>
         <div>
-          <label className="label">
+          <label
+            htmlFor="m-rut"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
             RUT{" "}
             <span className="text-xs text-slate-500 font-normal">
               (opcional)
             </span>
           </label>
           <input
-            className="input"
+            id="m-rut"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
             value={manual.apoderado_rut}
             onChange={(e) =>
               setManual((m) => ({ ...m, apoderado_rut: e.target.value }))
@@ -479,37 +530,41 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       </div>
 
       <div>
-        <label className="label">
+        <label
+          htmlFor="m-tel"
+          className="block text-sm font-medium text-slate-700 mb-1.5"
+        >
           Teléfono{" "}
           <span className="text-xs text-slate-500 font-normal">
             (opcional)
           </span>
         </label>
         <input
-          className="input"
+          id="m-tel"
+          className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
           value={manual.apoderado_telefono}
           onChange={(e) =>
             setManual((m) => ({ ...m, apoderado_telefono: e.target.value }))
           }
           placeholder="+56 9 1234 5678"
           autoComplete="tel"
+          inputMode="tel"
         />
       </div>
 
-      <div className="border-t border-slate-200 pt-3 mt-4">
-        <h3 className="font-medium text-slate-800 mb-1">
+      <div className="border-t border-slate-200 pt-4 mt-5">
+        <h3 className="font-medium text-slate-800">
           Datos de los alumnos
         </h3>
-        <p className="text-xs text-slate-500 mb-2">
-          Puedes agregar varios hijos. Esto nos ayuda a identificar
-          correctamente a tu familia cuando la crucemos con el listado del
-          colegio.
+        <p className="text-xs text-slate-500 mb-3 mt-1">
+          Puedes agregar varios hijos. Nos ayuda a identificar correctamente
+          tu familia.
         </p>
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {hijos.map((h, i) => (
             <div
               key={i}
-              className="border border-slate-200 rounded-md p-2 space-y-2"
+              className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50/60"
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-600">
@@ -527,9 +582,11 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="label text-xs">Nombre del alumno</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Nombre del alumno
+                  </label>
                   <input
-                    className="input"
+                    className="w-full h-11 px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 shadow-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
                     value={h.nombre}
                     onChange={(e) =>
                       actualizarHijo(i, { nombre: e.target.value })
@@ -539,9 +596,11 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
                   />
                 </div>
                 <div>
-                  <label className="label text-xs">Curso</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Curso
+                  </label>
                   <select
-                    className="input"
+                    className="w-full h-11 px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 shadow-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
                     value={h.curso}
                     onChange={(e) =>
                       actualizarHijo(i, { curso: e.target.value })
@@ -571,21 +630,30 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         </div>
         <button
           type="button"
-          className="text-sm text-brand-700 hover:underline mt-2"
+          className="text-sm text-brand-700 hover:underline mt-2.5"
           onClick={agregarHijo}
         >
           + Agregar otro hijo
         </button>
       </div>
 
-      <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-        <strong>Monto a pagar:</strong> $
-        {config.monto_cuota.toLocaleString("es-CL")} CLP · Socio{" "}
-        {config.periodo_anio}
+      <div className="rounded-xl bg-brand-50 border border-brand-200 p-4">
+        <div className="text-xs text-slate-600 uppercase tracking-wider font-medium">
+          Monto a pagar
+        </div>
+        <div className="text-2xl font-semibold text-brand-900 mt-0.5">
+          ${config.monto_cuota.toLocaleString("es-CL")} CLP
+        </div>
+        <div className="text-xs text-slate-600 mt-1">
+          Cuota socio {config.periodo_anio}
+        </div>
       </div>
 
       {error && (
-        <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
+        <div
+          role="alert"
+          className="text-sm bg-red-50 text-red-800 rounded-lg p-3 border border-red-200"
+        >
           {error}
         </div>
       )}
@@ -593,24 +661,25 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       <div className="flex gap-2">
         <button
           type="button"
-          className="btn-secondary"
+          className="h-[52px] px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
           onClick={() => setPaso({ nombre: "buscar" })}
         >
-          ← Volver a buscar
+          Volver
         </button>
         <button
           type="submit"
-          className="btn-primary flex-1"
+          className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
           disabled={pending}
         >
-          {pending ? "Procesando..." : "Continuar al pago →"}
+          {pending ? "Procesando…" : "Continuar al pago"}
         </button>
       </div>
 
-      <p className="text-xs text-slate-500 text-center pt-2">
-        Tu solicitud quedará marcada como <strong>pendiente de
-        identificar</strong>. La tesorería verificará tus datos y vincularte
-        a tu familia antes de confirmar la membresía.
+      <p className="text-xs text-slate-500 text-center leading-relaxed">
+        Tu solicitud quedará como{" "}
+        <strong>pendiente de identificar</strong>. La tesorería verificará
+        tus datos y la vinculará a tu familia antes de confirmar la
+        membresía.
       </p>
     </form>
   );
