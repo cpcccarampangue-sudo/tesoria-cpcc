@@ -546,8 +546,14 @@ export async function solicitarOtp(email: string): Promise<SolicitarOtpResult> {
     try {
       await enviarOtpEmail(emailNorm, emisor.codigo);
     } catch (err) {
-      const code = err instanceof Error ? err.name : "unknown";
-      console.error("[otp] enviar email fallo:", code);
+      const name = err instanceof Error ? err.name : "unknown";
+      const msg = err instanceof Error ? err.message : "";
+      // Logeamos name + message completos para diagnosticar (el message
+      // puede contener respuestas de SMTP tipo "Username and Password
+      // not accepted"). Luego degradamos a error_servicio para que el UI
+      // avise honestamente al usuario que no se envio.
+      console.error("[otp] enviar email fallo:", name, msg);
+      return { ok: false, motivo: "error_servicio" };
     }
 
     console.log(
