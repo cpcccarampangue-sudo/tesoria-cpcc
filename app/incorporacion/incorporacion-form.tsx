@@ -126,6 +126,12 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     startTransition(async () => {
       try {
         const r = await solicitarOtp(email);
+        if (!r.ok) {
+          setError(
+            "No pudimos enviar el código en este momento. Inténtalo nuevamente en unos minutos."
+          );
+          return;
+        }
         setPaso({ nombre: "otp", email });
         setCodigo("");
         setReenviarEnSeg(r.reintentarEnSeg ?? 60);
@@ -144,6 +150,12 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     startTransition(async () => {
       try {
         const r = await solicitarOtp(paso.email);
+        if (!r.ok) {
+          setError(
+            "No pudimos enviar el código en este momento. Inténtalo nuevamente."
+          );
+          return;
+        }
         setCodigo("");
         setReenviarEnSeg(r.reintentarEnSeg ?? 60);
         setInfo("Enviamos un código nuevo.");
@@ -176,6 +188,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           } else if (r.motivo === "max_intentos") {
             setError(
               "Demasiados intentos. Espera unos minutos y solicita un nuevo código."
+            );
+          } else if (r.motivo === "error_servicio") {
+            setError(
+              "No pudimos verificar el código en este momento. Inténtalo nuevamente."
             );
           } else {
             setError("Código incorrecto. Revisa los números e inténtalo nuevamente.");
