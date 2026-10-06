@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type {
   Apoderado,
   Contacto,
@@ -14,14 +14,25 @@ import { crearCheckout, sumupHabilitado } from "@/lib/sumup/client";
 import { siteUrl } from "@/lib/qr";
 import { todosLosCursos } from "@/lib/cursos";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { normalizarEmail } from "@/lib/normalizar";
 
 // Reexportamos desde el helper no-server para que la UI pueda importar
 // detectarTipoBusqueda y los masks sin problemas de "use server".
 import type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda } from "./tipos";
 import { maskEmail, maskNombre } from "./tipos";
 export type { TipoBusqueda, FamiliaCandidata, ResultadoBusqueda };
+
+// IMPORTANTE: usamos el admin client (service_role) en este flujo
+// publico porque las tablas contactos/apoderados/estudiantes tienen RLS
+// restrictivo (solo directiva/apoderado-dueno pueden leer). Sin esto,
+// la busqueda devuelve 0 filas para un usuario anonimo y el UI cree que
+// la familia no existe. El admin client bypassa RLS, por eso las
+// queries de este archivo filtran EXPLICITA y ESTRICTAMENTE por email
+// normalizado — nunca devolvemos listados abiertos.
+
+// Si queda algun comparador legacy que use regex de email, redirigir
+// SIEMPRE a normalizarEmail(input) !== null — asi la normalizacion es
+// la misma en todo el sistema.
 
 const MAX_RESULTADOS = 5;
 
@@ -48,142 +59,142 @@ function assertRateLimit(key: string, max: number, windowMs: number) {
   }
 }
 
-// Busqueda publica de familias: SOLO por email exacto del contacto.
-// Deliberadamente NO permitimos busqueda por apellido o nombre de
-// alumno en este flujo para proteger datos personales de las familias:
-// alguien podria enumerar la lista completa escaneando apellidos.
-// La busqueda por apellido/alumno existe en el admin (/socios/nuevo)
-// donde solo accede la directiva autenticada.
+// Datos crudos de una familia resuelta por correo. INTERNO: solo se
+// usa en el servidor. Nunca llega al cliente sin pasar por minimizacion.
+export type FamiliaResuelta = {
+  apoderado: Apoderado;
+  contactos: Contacto[];
+  estudiantes: Estudiante[];
+  yaSocioToken: string | null; // si ya es socio vigente, su qr_token
+  periodoVigente: number;
+};
+
+// Resuelve la familia asociada a un correo verificado. UNICA fuente de
+// verdad para "quien es este email". Reutilizada por buscarFamilias (que
+// enmascara para el flujo publico actual) y por el futuro flujo OTP (que
+// podra devolver datos completos una vez verificado el correo).
+//
+// Reglas:
+//   - Email ya debe venir normalizado (ver lib/normalizar.ts)
+//   - Usa service_role: la query filtra ESTRICTAMENTE por el email y
+//     limita cuantos registros procesa.
+//   - No lanza por "no encontrado": devuelve null.
+export async function resolverFamiliaPorEmail(
+  emailNorm: string
+): Promise<FamiliaResuelta | null> {
+  const supabase = createSupabaseAdminClient();
+
+  // 1) Buscar los contactos cuyo email coincida con el normalizado.
+  //    Usamos filter con `lower(email)` para forzar comparacion case-
+  //    insensitive consistente con el indice unique.
+  const { data: contactosMatch, error: ctxErr } = await supabase
+    .from("contactos")
+    .select("apoderado_id, email")
+    .ilike("email", emailNorm)
+    .limit(MAX_RESULTADOS + 1);
+  if (ctxErr) {
+    throw new Error(`db:${ctxErr.code ?? "error"}`);
+  }
+  const apoderadoIds = Array.from(
+    new Set(
+      (contactosMatch ?? [])
+        .map((r) => r.apoderado_id as string)
+        .filter(Boolean)
+    )
+  );
+  if (apoderadoIds.length === 0) return null;
+
+  // Nos quedamos con el primero (en la practica no deberia haber varios
+  // apoderados con el mismo correo porque el indice es unique por lower(email)).
+  const apoderadoId = apoderadoIds[0];
+
+  const [
+    { data: cfgData },
+    { data: apData },
+    { data: ctxData },
+    { data: estData },
+  ] = await Promise.all([
+    supabase.from("socio_config").select("periodo_anio").eq("id", 1).maybeSingle(),
+    supabase.from("apoderados").select("*").eq("id", apoderadoId).maybeSingle(),
+    supabase.from("contactos").select("*").eq("apoderado_id", apoderadoId),
+    supabase
+      .from("estudiantes")
+      .select("*")
+      .eq("apoderado_id", apoderadoId)
+      .eq("activo", true),
+  ]);
+
+  const periodoVigente =
+    (cfgData as { periodo_anio: number } | null)?.periodo_anio ??
+    new Date().getFullYear();
+  const apoderado = apData as Apoderado | null;
+  if (!apoderado) return null;
+
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select("qr_token, estado")
+    .eq("apoderado_id", apoderadoId)
+    .eq("periodo_anio", periodoVigente)
+    .in("estado", ["pagada", "enviada"])
+    .maybeSingle();
+
+  return {
+    apoderado,
+    contactos: ((ctxData as Contacto[] | null) ?? []).sort((x, y) =>
+      (x.nombre ?? "").localeCompare(y.nombre ?? "")
+    ),
+    estudiantes: ((estData as Estudiante[] | null) ?? []).sort((x, y) =>
+      x.nombre.localeCompare(y.nombre)
+    ),
+    yaSocioToken: (solData as { qr_token: string } | null)?.qr_token ?? null,
+    periodoVigente,
+  };
+}
+
+// Busqueda publica para el flujo ACTUAL de /incorporacion (sin OTP
+// todavia). Mantiene la minimizacion de datos. Deliberadamente NO
+// permitimos busqueda por apellido o nombre de alumno en este flujo.
 export async function buscarFamilias(
   consulta: string
 ): Promise<ResultadoBusqueda> {
-  const trimmed = consulta.trim();
-  if (!trimmed) {
-    throw new Error("Ingresa el correo electrónico del apoderado.");
-  }
-
-  // Validacion estricta: solo aceptamos email con formato valido. El
-  // mensaje aqui no revela si el correo existe en la base: solo valida
-  // formato.
-  if (!EMAIL_RE.test(trimmed)) {
+  const emailNorm = normalizarEmail(consulta);
+  if (!emailNorm) {
     throw new Error(
       "Ingresa un correo electrónico válido (ej. maria@ejemplo.cl)."
     );
   }
 
-  // Rate limit por IP: previene enumeracion masiva. La respuesta del
-  // endpoint intencionalmente NO distingue entre "sin coincidencias"
-  // y "familia encontrada": en ambos casos el formulario cliente
-  // avanza al paso siguiente. Esto reduce el valor de barrer correos.
+  // Rate limit por IP: previene enumeracion masiva.
   const key = await getRateLimitKey("incorp:buscar");
   assertRateLimit(key, RL_BUSQUEDA_MAX, RL_BUSQUEDA_WIN_MS);
 
   const tipo: TipoBusqueda = "email";
-  const supabase = await createSupabaseServerClient();
 
-  // Email exacto (case-insensitive). No usamos "like" con wildcards.
-  const { data } = await supabase
-    .from("contactos")
-    .select("apoderado_id")
-    .ilike("email", trimmed.toLowerCase())
-    .limit(MAX_RESULTADOS + 1);
-  const apoderadoIds = Array.from(
-    new Set((data ?? [])
-      .map((r) => r.apoderado_id as string)
-      .filter(Boolean))
-  );
-
-  if (apoderadoIds.length === 0) {
+  const familia = await resolverFamiliaPorEmail(emailNorm);
+  if (!familia) {
     return { tipo, familias: [], hayMas: false };
   }
 
-  const hayMas = apoderadoIds.length > MAX_RESULTADOS;
-  const idsAUsar = apoderadoIds.slice(0, MAX_RESULTADOS);
-
-  // Config vigente para saber el periodo activo al consultar solicitudes.
-  const { data: cfgData } = await supabase
-    .from("socio_config")
-    .select("periodo_anio")
-    .eq("id", 1)
-    .maybeSingle();
-  const periodoVigente =
-    (cfgData as { periodo_anio: number } | null)?.periodo_anio ??
-    new Date().getFullYear();
-
-  const [
-    { data: apoderadosData },
-    { data: contactosData },
-    { data: estudiantesData },
-    { data: solicitudesData },
-  ] = await Promise.all([
-    supabase.from("apoderados").select("id, nombre").in("id", idsAUsar),
-    supabase
-      .from("contactos")
-      .select("apoderado_id, email, nombre")
-      .in("apoderado_id", idsAUsar),
-    supabase
-      .from("estudiantes")
-      .select("id, apoderado_id, nombre, curso")
-      .in("apoderado_id", idsAUsar)
-      .eq("activo", true),
-    supabase
-      .from("socio_solicitudes")
-      .select("apoderado_id, qr_token, estado")
-      .in("apoderado_id", idsAUsar)
-      .eq("periodo_anio", periodoVigente)
-      .in("estado", ["pagada", "enviada"]),
-  ]);
-
-  const apoderadosMap = new Map<string, { id: string; nombre: string }>();
-  for (const a of (apoderadosData ?? []) as { id: string; nombre: string }[]) {
-    apoderadosMap.set(a.id, a);
-  }
-  const contactosMap = new Map<string, Contacto[]>();
-  for (const c of (contactosData ?? []) as Contacto[]) {
-    const arr = contactosMap.get(c.apoderado_id) ?? [];
-    arr.push(c);
-    contactosMap.set(c.apoderado_id, arr);
-  }
-  const estudiantesMap = new Map<string, Estudiante[]>();
-  for (const e of (estudiantesData ?? []) as Estudiante[]) {
-    const arr = estudiantesMap.get(e.apoderado_id) ?? [];
-    arr.push(e);
-    estudiantesMap.set(e.apoderado_id, arr);
-  }
-  const yaSocioMap = new Map<string, string>(); // apoderado_id -> qr_token
-  for (const s of (solicitudesData ?? []) as {
-    apoderado_id: string;
-    qr_token: string;
-  }[]) {
-    yaSocioMap.set(s.apoderado_id, s.qr_token);
-  }
-
-  const familias: FamiliaCandidata[] = [];
-  for (const id of idsAUsar) {
-    const a = apoderadosMap.get(id);
-    if (!a) continue;
-    const contactosOrdenados = (contactosMap.get(id) ?? []).sort((x, y) =>
-      (x.nombre ?? "").localeCompare(y.nombre ?? "")
-    );
-    const estudiantesOrdenados = (estudiantesMap.get(id) ?? []).sort((x, y) =>
-      x.nombre.localeCompare(y.nombre)
-    );
-    familias.push({
-      apoderadoId: a.id,
-      apoderadoNombreMask: maskNombre(a.nombre ?? ""),
-      contactosMask: contactosOrdenados
-        .filter((c) => c.email)
-        .map((c) => ({ emailMask: maskEmail(c.email as string) })),
-      estudiantes: estudiantesOrdenados.map((e) => ({
-        id: e.id,
-        nombreMask: maskNombre(e.nombre),
-        curso: e.curso ?? null,
-      })),
-      yaSocioToken: yaSocioMap.get(id) ?? null,
-    });
-  }
-
-  return { tipo, familias, hayMas };
+  const contactosFiltrados = familia.contactos.filter((c) => c.email);
+  return {
+    tipo,
+    familias: [
+      {
+        apoderadoId: familia.apoderado.id,
+        apoderadoNombreMask: maskNombre(familia.apoderado.nombre ?? ""),
+        contactosMask: contactosFiltrados.map((c) => ({
+          emailMask: maskEmail(c.email as string),
+        })),
+        estudiantes: familia.estudiantes.map((e) => ({
+          id: e.id,
+          nombreMask: maskNombre(e.nombre),
+          curso: e.curso ?? null,
+        })),
+        yaSocioToken: familia.yaSocioToken,
+      },
+    ],
+    hayMas: false,
+  };
 }
 
 export type CrearSolicitudInput = {
@@ -200,15 +211,15 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   const key = await getRateLimitKey("incorp:crear");
   assertRateLimit(key, RL_SOLICITUD_MAX, RL_SOLICITUD_WIN_MS);
 
-  const email = input.apoderado_email.trim().toLowerCase();
-  if (!EMAIL_RE.test(email)) {
+  const email = normalizarEmail(input.apoderado_email);
+  if (!email) {
     throw new Error("El correo electrónico no es válido.");
   }
   if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
     throw new Error("No hay hijos vinculados para esta familia.");
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
 
   const { data: apoderadoData } = await supabase
     .from("apoderados")
@@ -348,13 +359,13 @@ export async function crearSolicitudManualSocio(
   const key = await getRateLimitKey("incorp:crear");
   assertRateLimit(key, RL_SOLICITUD_MAX, RL_SOLICITUD_WIN_MS);
 
-  const email = input.apoderado_email.trim().toLowerCase();
+  const email = normalizarEmail(input.apoderado_email);
   const nombre = input.apoderado_nombre.trim();
 
   if (!nombre || nombre.length < 3) {
     throw new Error("Ingresa el nombre del apoderado.");
   }
-  if (!EMAIL_RE.test(email)) {
+  if (!email) {
     throw new Error("El correo electrónico no es válido.");
   }
 
@@ -380,7 +391,7 @@ export async function crearSolicitudManualSocio(
   const alumnoRepr = hijosLimpios.map((h) => h.nombre).join(", ");
   const cursoRepr = hijosLimpios.map((h) => h.curso).join(", ");
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
 
   const { data: cfgData } = await supabase
     .from("socio_config")
@@ -457,7 +468,7 @@ async function intentarRedirigirACheckout(
   if (!sumupHabilitado()) return;
   let urlSumUp: string | null = null;
   try {
-    const supabase = await createSupabaseServerClient();
+    const supabase = createSupabaseAdminClient();
     const checkout = await crearCheckout({
       checkoutReference: `socio_${solicitud.id}`,
       amount: config.monto_cuota,

@@ -57,21 +57,33 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     startTransition(async () => {
       try {
         const resultado = await buscarFamilias(consulta);
+        // Estado explicito NOT_FOUND: el servidor consulto exitosamente
+        // y confirmo que el correo no esta en la base. Recien aqui
+        // ofrecemos el flujo manual. Si el servidor tira (error de red,
+        // db, rate limit) caemos al catch y mostramos el mensaje real:
+        // NO asumimos "no encontrado" cuando en realidad fue "no sabemos".
         if (resultado.familias.length === 0) {
-          // No se encontro: ofrecer flujo manual con el correo que ingreso.
           setPaso({ nombre: "manual", consulta });
           setManual((m) => ({ ...m, apoderado_email: consulta.trim() }));
           setHijos([{ nombre: "", curso: "" }]);
           return;
         }
         if (resultado.familias.length === 1) {
-          // Unica coincidencia: pasar directo a confirmar.
           elegirFamilia(resultado.familias[0]);
           return;
         }
         setPaso({ nombre: "elegir", resultado, consulta });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Error.");
+        const raw = err instanceof Error ? err.message : "";
+        // Mensajes "db:*" vienen del server cuando falla una query y
+        // no son amigables; los reemplazamos por uno generico. El resto
+        // (validacion de formato, rate limit) ya es amigable.
+        const esDbError = raw.startsWith("db:");
+        setError(
+          esDbError
+            ? "No pudimos verificar tus datos en este momento. Inténtalo nuevamente en unos minutos."
+            : raw || "Error inesperado."
+        );
       }
     });
   }
