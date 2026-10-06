@@ -37,6 +37,27 @@ export function AccionesSolicitud({
     });
   }
 
+  // Variante para acciones que devuelven { ok, error } en vez de throw.
+  // Usa esto cuando el error puede ser oscurecido por el runtime de Next.
+  function runWithResult(
+    fn: () => Promise<{ ok: true } | { ok: false; error: string }>
+  ) {
+    setError(null);
+    setSuccess(null);
+    startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          setSuccess("Acción completada.");
+        } else {
+          setError(res.error);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Error.");
+      }
+    });
+  }
+
   return (
     <div className="space-y-3 text-sm">
       {s.estado === "pendiente_match" && (
@@ -80,7 +101,7 @@ export function AccionesSolicitud({
           <button
             className="btn-primary"
             disabled={pending}
-            onClick={() => run(() => registrarReenvioEmail(s.id))}
+            onClick={() => runWithResult(() => registrarReenvioEmail(s.id))}
           >
             📧 Enviar QR por correo
           </button>
@@ -102,7 +123,7 @@ export function AccionesSolicitud({
           <button
             className="btn-primary"
             disabled={pending}
-            onClick={() => run(() => registrarReenvioEmail(s.id))}
+            onClick={() => runWithResult(() => registrarReenvioEmail(s.id))}
           >
             🔁 Reenviar QR
           </button>

@@ -507,10 +507,22 @@ export async function anularSolicitud(id: string) {
 // Genera el QR del socio y lo envia por correo via Resend. Actualiza
 // estado a "enviada" y, si es un reenvio, incrementa el contador. Se usa
 // desde el panel admin para "enviar QR" o "reenviar QR".
-export async function registrarReenvioEmail(id: string) {
+// Devuelve un objeto result en vez de throw para que el error no quede
+// oculto por el runtime de Next.js en produccion ("Server Components
+// render"). El cliente lee result.ok y si es false muestra el mensaje.
+export async function registrarReenvioEmail(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
   await requireDirectiva();
-  await enviarCorreoQrSocio(id);
-  revalidatePath("/socios");
-  revalidatePath(`/socios/${id}`);
-  revalidatePath("/apoderados");
+  try {
+    await enviarCorreoQrSocio(id);
+    revalidatePath("/socios");
+    revalidatePath(`/socios/${id}`);
+    revalidatePath("/apoderados");
+    return { ok: true };
+  } catch (err) {
+    const mensaje =
+      err instanceof Error ? err.message : "Error desconocido al enviar el correo.";
+    return { ok: false, error: mensaje };
+  }
 }
