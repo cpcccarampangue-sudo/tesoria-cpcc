@@ -4,6 +4,141 @@ import { revalidatePath } from "next/cache";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
+import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
+import type {
+  FamiliaCandidataAdmin,
+  ResultadoBusquedaAdmin,
+} from "./tipos";
+
+// Busqueda flexible de familias para el admin (NO publica). A diferencia
+// de la busqueda publica de /incorporacion, aqui aceptamos email, nombre
+// del apoderado, nombre del alumno o RUT, y devolvemos datos completos.
+// La proteccion es requireDirectiva(): solo usuarios autenticados con
+// rol directiva pueden ejecutarla.
+export async function buscarFamiliasAdmin(
+  consulta: string
+): Promise<ResultadoBusquedaAdmin> {
+  await requireDirectiva();
+  const trimmed = consulta.trim();
+  if (!trimmed || trimmed.length < 2) {
+    return { familias: [], hayMas: false };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const MAX = 10;
+  const q = trimmed.toLowerCase();
+  const idSet = new Set<string>();
+
+  // 1) match por email, nombre o RUT del contacto
+  const { data: cData } = await supabase
+    .from("contactos")
+    .select("apoderado_id, email, nombre, rut")
+    .or(`email.ilike.%${q}%,nombre.ilike.%${q}%,rut.ilike.%${q}%`)
+    .limit(MAX + 1);
+  for (const c of (cData ?? []) as Array<{ apoderado_id: string }>) {
+    if (c.apoderado_id) idSet.add(c.apoderado_id);
+  }
+
+  // 2) match por nombre del apoderado
+  const { data: aData } = await supabase
+    .from("apoderados")
+    .select("id, nombre")
+    .ilike("nombre", `%${q}%`)
+    .limit(MAX + 1);
+  for (const a of (aData ?? []) as Array<{ id: string }>) {
+    idSet.add(a.id);
+  }
+
+  // 3) match por nombre de alumno activo
+  const { data: eData } = await supabase
+    .from("estudiantes")
+    .select("apoderado_id, nombre")
+    .ilike("nombre", `%${q}%`)
+    .eq("activo", true)
+    .limit(MAX + 1);
+  for (const e of (eData ?? []) as Array<{ apoderado_id: string }>) {
+    if (e.apoderado_id) idSet.add(e.apoderado_id);
+  }
+
+  if (idSet.size === 0) {
+    return { familias: [], hayMas: false };
+  }
+
+  const ids = Array.from(idSet).slice(0, MAX);
+  const hayMas = idSet.size > MAX;
+
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("periodo_anio")
+    .eq("id", 1)
+    .maybeSingle();
+  const periodoVigente =
+    (cfgData as { periodo_anio: number } | null)?.periodo_anio ??
+    new Date().getFullYear();
+
+  const [
+    { data: apoderadosData },
+    { data: contactosData },
+    { data: estudiantesData },
+    { data: solData },
+  ] = await Promise.all([
+    supabase.from("apoderados").select("*").in("id", ids),
+    supabase.from("contactos").select("*").in("apoderado_id", ids),
+    supabase
+      .from("estudiantes")
+      .select("*")
+      .in("apoderado_id", ids)
+      .eq("activo", true),
+    supabase
+      .from("socio_solicitudes")
+      .select("apoderado_id, qr_token, estado")
+      .in("apoderado_id", ids)
+      .eq("periodo_anio", periodoVigente)
+      .in("estado", ["pagada", "enviada"]),
+  ]);
+
+  const apoderadosMap = new Map<string, Apoderado>();
+  for (const a of (apoderadosData ?? []) as Apoderado[]) {
+    apoderadosMap.set(a.id, a);
+  }
+  const contactosMap = new Map<string, Contacto[]>();
+  for (const c of (contactosData ?? []) as Contacto[]) {
+    const arr = contactosMap.get(c.apoderado_id) ?? [];
+    arr.push(c);
+    contactosMap.set(c.apoderado_id, arr);
+  }
+  const estudiantesMap = new Map<string, Estudiante[]>();
+  for (const e of (estudiantesData ?? []) as Estudiante[]) {
+    const arr = estudiantesMap.get(e.apoderado_id) ?? [];
+    arr.push(e);
+    estudiantesMap.set(e.apoderado_id, arr);
+  }
+  const yaSocioMap = new Map<string, string>();
+  for (const s of (solData ?? []) as {
+    apoderado_id: string;
+    qr_token: string;
+  }[]) {
+    yaSocioMap.set(s.apoderado_id, s.qr_token);
+  }
+
+  const familias: FamiliaCandidataAdmin[] = [];
+  for (const id of ids) {
+    const a = apoderadosMap.get(id);
+    if (!a) continue;
+    familias.push({
+      apoderado: a,
+      contactos: (contactosMap.get(id) ?? []).sort((x, y) =>
+        (x.nombre ?? "").localeCompare(y.nombre ?? "")
+      ),
+      estudiantes: (estudiantesMap.get(id) ?? []).sort((x, y) =>
+        x.nombre.localeCompare(y.nombre)
+      ),
+      yaSocioToken: yaSocioMap.get(id) ?? null,
+    });
+  }
+
+  return { familias, hayMas };
+}
 
 // Config
 export type ActualizarConfigInput = {

@@ -3,15 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { SocioConfig } from "@/lib/types";
-import { buscarFamilias } from "@/app/incorporacion/actions";
-import type { FamiliaCandidata } from "@/app/incorporacion/tipos";
-import { crearSocioConPagoManual } from "../actions";
+import { buscarFamiliasAdmin, crearSocioConPagoManual } from "../actions";
+import type { FamiliaCandidataAdmin } from "../tipos";
 
 type CuentaOp = { id: string; nombre: string; es_principal: boolean };
 
 type Paso =
   | { nombre: "buscar" }
-  | { nombre: "confirmar"; familia: FamiliaCandidata };
+  | { nombre: "confirmar"; familia: FamiliaCandidataAdmin };
 
 export function NuevoSocioForm({
   config,
@@ -25,7 +24,7 @@ export function NuevoSocioForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [consulta, setConsulta] = useState("");
-  const [resultados, setResultados] = useState<FamiliaCandidata[]>([]);
+  const [resultados, setResultados] = useState<FamiliaCandidataAdmin[]>([]);
   const [hayMas, setHayMas] = useState(false);
 
   // Estado del paso "confirmar"
@@ -45,7 +44,7 @@ export function NuevoSocioForm({
     setError(null);
     startTransition(async () => {
       try {
-        const r = await buscarFamilias(consulta);
+        const r = await buscarFamiliasAdmin(consulta);
         setResultados(r.familias);
         setHayMas(r.hayMas);
         if (r.familias.length === 0) {
@@ -61,7 +60,7 @@ export function NuevoSocioForm({
     });
   }
 
-  function elegirFamilia(f: FamiliaCandidata) {
+  function elegirFamilia(f: FamiliaCandidataAdmin) {
     setPaso({ nombre: "confirmar", familia: f });
     setEstudianteIds(new Set(f.estudiantes.map((e) => e.id)));
     const emailContacto = f.contactos.find((c) => c.email)?.email ?? "";
