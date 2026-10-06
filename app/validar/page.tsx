@@ -1,5 +1,6 @@
 import { PublicHeader } from "@/components/public-header";
 import { PublicFooter } from "@/components/public-footer";
+import { requireDirectiva } from "@/lib/auth";
 import { ValidadorClient } from "./validador-client";
 
 export const metadata = {
@@ -7,7 +8,13 @@ export const metadata = {
 };
 export const dynamic = "force-dynamic";
 
-export default function ValidarPage() {
+export default async function ValidarPage() {
+  // El validador solo esta accesible para directiva. Si no hay sesion
+  // o el rol no es directiva, requireDirectiva() redirige a /login o
+  // /dashboard respectivamente. Cuando se implemente el modulo
+  // convenios, agregar un chequeo adicional para rol operador aqui.
+  await requireDirectiva();
+
   const anio = new Date().getFullYear();
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F8FA]">

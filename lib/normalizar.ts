@@ -7,11 +7,18 @@
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Caracteres zero-width que algunos teclados moviles / autofill agregan
+// y que trim() no quita: ZWSP, ZWNJ, ZWJ, BOM.
+const ZERO_WIDTH_RE = /[​‌‍﻿]/g;
+
+// Combining diacritical marks (tildes) para quitar acentos.
+const DIACRITICS_RE = /[̀-ͯ]/g;
+
 /**
  * Normaliza un correo electronico de forma determinista:
  *   1. normalize("NFKC") — unifica variantes Unicode (ej. ligaduras,
  *      caracteres de ancho completo que algunos teclados moviles usan).
- *   2. elimina caracteres de control y zero-width del inicio/fin.
+ *   2. elimina caracteres zero-width del inicio/medio/fin.
  *   3. trim() de espacios estandar.
  *   4. toLowerCase() porque los dominios de correo son case-insensitive
  *      y en la practica tratamos el local-part tambien asi.
@@ -21,11 +28,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 export function normalizarEmail(input: string | null | undefined): string | null {
   if (!input) return null;
-  // NFKC primero: unifica caracteres equivalentes (eg "ｅ" fullwidth -> "e")
   let s = input.normalize("NFKC");
-  // Reemplaza caracteres zero-width/invisibles mas comunes.
-  // U+200B zero-width space, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM.
-  s = s.replace(/[​‌‍﻿]/g, "");
+  s = s.replace(ZERO_WIDTH_RE, "");
   s = s.trim();
   s = s.toLowerCase();
   if (!EMAIL_RE.test(s)) return null;
@@ -39,7 +43,36 @@ export function limpiarEmail(input: string | null | undefined): string {
   if (!input) return "";
   return input
     .normalize("NFKC")
-    .replace(/[​‌‍﻿]/g, "")
+    .replace(ZERO_WIDTH_RE, "")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * Normaliza un texto quitando tildes y bajando a lowercase. Pensado
+ * para comparar nombres/apellidos de forma tolerante a tildes y
+ * capitalizacion:
+ *   "González"  -> "gonzalez"
+ *   "GONZÁLEZ"  -> "gonzalez"
+ *   "Nuñez"     -> "nunez"
+ * Ojo: tambien saca eñe. Para el caso de uso (buscar apellido) es
+ * aceptable y aumenta tolerancia (gente que no escribe la enie).
+ */
+export function sinTildes(input: string | null | undefined): string {
+  if (!input) return "";
+  return input
+    .normalize("NFKD")
+    .replace(DIACRITICS_RE, "")
+    .replace(/ñ/gi, "n")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Deja solo los digitos de una cadena. Util para comparar los ultimos
+ * N digitos de un telefono sin importar formato.
+ */
+export function soloDigitos(input: string | null | undefined): string {
+  if (!input) return "";
+  return input.replace(/\D/g, "");
 }
