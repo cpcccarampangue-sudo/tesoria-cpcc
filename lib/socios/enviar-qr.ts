@@ -3,7 +3,7 @@
 // como desde el panel admin cuando se reenvia manualmente.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { enviarCorreo } from "@/lib/email/resend";
+import { enviarCorreo } from "@/lib/email/mailer";
 import { armarCorreoSocioHtml } from "@/lib/email/socio-template";
 import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
 import type { SocioSolicitud } from "@/lib/types";

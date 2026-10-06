@@ -6,10 +6,10 @@
 // correo mismo sea un vector de enumeracion si alguien pide OTP a
 // correos ajenos.
 //
-// Reutiliza enviarCorreo() que ya configura Resend con el From/ReplyTo
-// correctos.
+// Reutiliza enviarCorreo() que ya configura el transporte SMTP (Gmail)
+// con el From/ReplyTo correctos.
 
-import { enviarCorreo } from "@/lib/email/resend";
+import { enviarCorreo } from "@/lib/email/mailer";
 import { OTP_CONFIG } from "./service";
 
 const ANIO = new Date().getFullYear();
