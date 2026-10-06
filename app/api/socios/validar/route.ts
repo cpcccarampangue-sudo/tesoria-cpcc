@@ -1,18 +1,20 @@
 // Endpoint publico para validar un QR de socio desde el PWA /validar.
-// Responde JSON con el estado del socio: activo o no_valido con motivo.
-// No requiere autenticacion (el token del QR actua como auth): el token
-// es un UUID v4 (gen_random_uuid, 122 bits de entropia) y es
-// impredecible/opaco.
+// Responde JSON con la MINIMA informacion necesaria para acreditar la
+// membresia: nombre reducido (primer nombre + inicial), estado,
+// vigencia, categoria y periodo. No requiere autenticacion (el token
+// del QR actua como auth: UUID v4 de 122 bits).
 //
 // Hardening:
-//   - rate limit por IP para evitar que un atacante enumere tokens.
-//   - respuesta minimizada: solo lo necesario para validar visualmente.
-//   - mensajes de error que NO distinguen entre "no existe" y "mal formato"
-//     cuando no es util para el validador.
+//   - rate limit por IP para prevenir enumeracion de tokens.
+//   - respuesta minimizada: NO devolvemos email, telefono, RUT, hijos,
+//     curso, monto ni fecha de pago.
+//   - mensaje de error GENERICO: no distingue entre "no existe",
+//     "no pago", "periodo expirado" o "formato invalido" porque esa
+//     info permite inferir datos de terceros.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Estudiante, SocioConfig, SocioSolicitud } from "@/lib/types";
+import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -20,19 +22,36 @@ export const dynamic = "force-dynamic";
 const UUID_V4_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// Permitimos escaneos rapidos consecutivos en eventos reales (una
-// persona de la directiva puede escanear 1 QR cada 2-3 segundos), pero
-// cerramos la puerta a enumeracion masiva.
+// Mensaje unico para TODOS los casos de QR no acreditable. Esto previene
+// que un atacante use diferencias en el mensaje para inferir si un token
+// existe, si una familia aun no pagó, o si una inscripcion fue dada de
+// baja.
+const MOTIVO_GENERICO =
+  "La credencial no se encuentra registrada o no está vigente.";
+
 const RL_MAX = 60;
 const RL_WIN_MS = 60 * 1000;
+
+type RespuestaInvalida = {
+  valid: false;
+  motivo: string;
+};
+type RespuestaValida = {
+  valid: true;
+  displayName: string;
+  status: "Activo";
+  category: "Apoderado";
+  validUntil: string; // DD/MM/YYYY
+  periodo: number;
+};
 
 export async function GET(req: NextRequest) {
   const ip = clientIp(req.headers);
   const r = rateLimit(`validar:${ip}`, RL_MAX, RL_WIN_MS);
   if (!r.ok) {
-    return NextResponse.json(
+    return NextResponse.json<RespuestaInvalida>(
       {
-        estado: "no_valido",
+        valid: false,
         motivo: `Demasiados intentos. Espera ${r.retryAfterSeconds} segundos.`,
       },
       {
@@ -43,21 +62,8 @@ export async function GET(req: NextRequest) {
   }
 
   const token = req.nextUrl.searchParams.get("token")?.trim();
-  if (!token) {
-    return NextResponse.json(
-      { estado: "no_valido", motivo: "Falta el token." },
-      { status: 400 }
-    );
-  }
-
-  // Validamos forma estricta de UUID v4. Rechazamos pre-consulta para
-  // no gastar queries en basura y para no distinguir en el tiempo entre
-  // "mal formato" y "token inexistente".
-  if (!UUID_V4_RE.test(token)) {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: "Este QR no corresponde a un socio del CdP.",
-    });
+  if (!token || !UUID_V4_RE.test(token)) {
+    return invalida();
   }
 
   const supabase = await createSupabaseServerClient();
@@ -65,97 +71,79 @@ export async function GET(req: NextRequest) {
     supabase
       .from("socio_solicitudes")
       .select(
-        "id, apoderado_id, apoderado_nombre, alumno_nombre, curso, estado, periodo_anio, pagada_en"
+        "apoderado_nombre, estado, periodo_anio"
       )
       .eq("qr_token", token)
       .maybeSingle(),
     supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
   ]);
 
-  const solicitud = solData as SocioSolicitud | null;
+  const solicitud = solData as Pick<
+    SocioSolicitud,
+    "apoderado_nombre" | "estado" | "periodo_anio"
+  > | null;
   const config = cfgData as SocioConfig | null;
   const periodoVigente = config?.periodo_anio ?? new Date().getFullYear();
 
-  if (!solicitud) {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: "Este QR no corresponde a ningún socio registrado.",
-    });
-  }
-
-  if (solicitud.estado === "pendiente_pago") {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: "El socio aún no completa el pago de su cuota.",
-    });
-  }
-
-  if (solicitud.estado === "rechazada" || solicitud.estado === "anulada") {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: "Esta inscripción fue dada de baja.",
-    });
-  }
-
-  if (solicitud.periodo_anio !== periodoVigente) {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: `QR del período ${solicitud.periodo_anio}, ya no vigente (actual: ${periodoVigente}).`,
-    });
-  }
-
-  // El QR es valido una vez que el pago esta confirmado (estados
-  // "pagada" o "enviada"). El envio de correo es opcional y no debe
-  // bloquear la validez de la membresia.
+  // Cualquier caso que no sea un socio vigente devuelve el mismo
+  // mensaje generico (ver constante arriba).
+  if (!solicitud) return invalida();
   if (solicitud.estado !== "pagada" && solicitud.estado !== "enviada") {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: "Esta inscripción no está activa.",
-    });
+    return invalida();
   }
+  if (solicitud.periodo_anio !== periodoVigente) return invalida();
 
-  // Validacion por fecha: si el periodo tiene inicio/fin configurados,
-  // el QR solo es valido entre esas fechas.
   const hoy = new Date().toISOString().slice(0, 10);
-  if (config?.periodo_inicio && hoy < config.periodo_inicio) {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: `El período ${periodoVigente} empieza el ${config.periodo_inicio}.`,
-    });
-  }
-  if (config?.periodo_fin && hoy > config.periodo_fin) {
-    return NextResponse.json({
-      estado: "no_valido",
-      motivo: `Este QR expiró el ${config.periodo_fin}.`,
-    });
-  }
+  if (config?.periodo_inicio && hoy < config.periodo_inicio) return invalida();
+  if (config?.periodo_fin && hoy > config.periodo_fin) return invalida();
 
-  // Cargar hijos de la familia linkeada, si aplica.
-  let hijos: Array<{ nombre: string; curso: string | null }> = [];
-  if (solicitud.apoderado_id) {
-    const { data: estData } = await supabase
-      .from("estudiantes")
-      .select("nombre, curso")
-      .eq("apoderado_id", solicitud.apoderado_id)
-      .eq("activo", true)
-      .order("nombre");
-    hijos = ((estData as Pick<Estudiante, "nombre" | "curso">[] | null) ?? []).map(
-      (e) => ({ nombre: e.nombre, curso: e.curso })
-    );
-  }
-  // Fallback para solicitudes antiguas sin apoderado_id linkeado.
-  if (hijos.length === 0) {
-    hijos = [{ nombre: solicitud.alumno_nombre, curso: solicitud.curso }];
-  }
+  // Respuesta MINIMIZADA: nombre reducido, sin alumnos, sin fechas de
+  // pago, sin montos. "Pamela Rodriguez Caceres" -> "Pamela R."
+  const displayName = reducirNombre(solicitud.apoderado_nombre);
+  const validUntil = formatearVigencia(
+    config?.periodo_fin ?? null,
+    periodoVigente
+  );
 
-  // Respuesta minimizada: solo lo que el validador necesita para
-  // contrastar visualmente la identidad del portador del QR. No
-  // devolvemos email, telefono, RUT ni monto pagado.
-  return NextResponse.json({
-    estado: "activo",
-    apoderado: solicitud.apoderado_nombre,
-    hijos,
-    periodo: solicitud.periodo_anio,
-    pagadaEn: solicitud.pagada_en,
+  return NextResponse.json<RespuestaValida>({
+    valid: true,
+    displayName,
+    status: "Activo",
+    category: "Apoderado",
+    validUntil,
+    periodo: periodoVigente,
   });
+}
+
+function invalida(): NextResponse<RespuestaInvalida> {
+  return NextResponse.json<RespuestaInvalida>({
+    valid: false,
+    motivo: MOTIVO_GENERICO,
+  });
+}
+
+// Toma un nombre completo y devuelve "Primer nombre + inicial del
+// siguiente token con punto". Nunca devuelve mas de dos tokens visibles.
+function reducirNombre(nombre: string): string {
+  const partes = nombre
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0);
+  if (partes.length === 0) return "—";
+  if (partes.length === 1) return partes[0];
+  const primero = partes[0];
+  const siguiente = partes[1];
+  const inicial = siguiente[0].toUpperCase();
+  return `${primero} ${inicial}.`;
+}
+
+// Vigencia: si hay fecha de fin configurada la usamos. Si no, 31/12 del
+// periodo. Formato DD/MM/YYYY (es-CL).
+function formatearVigencia(
+  periodoFin: string | null,
+  periodo: number
+): string {
+  const iso = periodoFin ?? `${periodo}-12-31`;
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }

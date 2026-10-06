@@ -3,29 +3,32 @@
 import { useEffect, useRef, useState } from "react";
 import type { Html5Qrcode } from "html5-qrcode";
 
-type ResultadoValidacion =
-  | {
-      estado: "activo";
-      apoderado: string;
-      hijos: Array<{ nombre: string; curso: string | null }>;
-      periodo: number;
-      pagadaEn: string | null;
-    }
-  | {
-      estado: "no_valido";
-      motivo: string;
-    };
+const UUID_V4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type ResultadoValido = {
+  valid: true;
+  displayName: string;
+  status: "Activo";
+  category: "Apoderado";
+  validUntil: string;
+  periodo: number;
+};
+type ResultadoInvalido = { valid: false; motivo: string };
+type Resultado = ResultadoValido | ResultadoInvalido;
+
+type Modo = "inicial" | "camara" | "manual";
 
 export function ValidadorClient() {
-  const [scanning, setScanning] = useState(false);
-  const [resultado, setResultado] = useState<ResultadoValidacion | null>(null);
+  const [modo, setModo] = useState<Modo>("inicial");
+  const [resultado, setResultado] = useState<Resultado | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
+  const [codigoManual, setCodigoManual] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const containerId = "qr-reader-container";
 
   useEffect(() => {
-    // Cleanup al desmontar: detener la camara si quedo activa.
     return () => {
       scannerRef.current?.stop().catch(() => {});
       scannerRef.current?.clear();
@@ -33,137 +36,231 @@ export function ValidadorClient() {
     };
   }, []);
 
-  async function iniciarEscaneo() {
+  async function iniciarCamara() {
     setError(null);
     setResultado(null);
-    setScanning(true);
-
+    setModo("camara");
     try {
-      // Import dinamico para evitar que la libreria (que usa canvas y
-      // getUserMedia) se cargue en el servidor.
       const { Html5Qrcode } = await import("html5-qrcode");
       const scanner = new Html5Qrcode(containerId);
       scannerRef.current = scanner;
       await scanner.start(
         { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 240, height: 240 },
-        },
+        { fps: 10, qrbox: { width: 240, height: 240 } },
         async (decodedText) => {
-          // Al detectar un QR, detenemos la camara y validamos.
           await scanner.stop().catch(() => {});
-          setScanning(false);
           await validar(decodedText);
         },
-        () => {
-          // Error de frame (sin QR detectado), lo ignoramos.
-        }
+        () => {}
       );
     } catch (err) {
-      setScanning(false);
+      setModo("inicial");
       setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo acceder a la cámara. Autoriza el permiso e inténtalo de nuevo."
+        err instanceof Error && err.message
+          ? "No se pudo acceder a la cámara. Autoriza el permiso o usa el ingreso manual."
+          : "Cámara no disponible. Usa el ingreso manual."
       );
     }
   }
 
-  async function cancelarEscaneo() {
+  async function cancelarCamara() {
     await scannerRef.current?.stop().catch(() => {});
-    setScanning(false);
+    setModo("inicial");
+  }
+
+  function abrirManual() {
+    setError(null);
+    setResultado(null);
+    setCodigoManual("");
+    setModo("manual");
+  }
+
+  async function enviarManual(e: React.FormEvent) {
+    e.preventDefault();
+    await validar(codigoManual);
   }
 
   async function validar(textoQr: string) {
     setCargando(true);
     setError(null);
     try {
-      // Extraer el token del texto del QR. Puede ser URL completa o solo
-      // el token UUID. El endpoint valida estrictamente el formato.
+      // El codigo del QR puede ser una URL completa o solo el token UUID.
+      // Extraemos el token y lo validamos cliente-side antes de pegar al
+      // endpoint para no gastar rate limit en basura.
       const match = textoQr.match(/\/socio\/([0-9a-fA-F-]{8,})\b/);
-      const token = match ? match[1] : textoQr.trim();
+      const token = (match ? match[1] : textoQr).trim();
+
+      if (!UUID_V4_RE.test(token)) {
+        setResultado({
+          valid: false,
+          motivo:
+            "El código no tiene el formato esperado. Verifica que estés escaneando un QR del Centro de Padres.",
+        });
+        setModo("inicial");
+        return;
+      }
 
       const res = await fetch(
         `/api/socios/validar?token=${encodeURIComponent(token)}`
       );
-      const data = (await res.json()) as ResultadoValidacion;
+      const data = (await res.json()) as Resultado;
       setResultado(data);
+      setModo("inicial");
     } catch {
-      setError("No se pudo validar el QR. Revisa tu conexión.");
+      setError("No se pudo validar. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
       setCargando(false);
     }
   }
 
-  function escanearOtro() {
+  function reiniciar() {
     setResultado(null);
     setError(null);
+    setModo("inicial");
+    setCodigoManual("");
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Boton principal grande, estado inicial */}
-      {!scanning && !resultado && !cargando && (
-        <button
-          type="button"
-          className="w-full h-[72px] rounded-2xl bg-brand-700 hover:bg-brand-900 text-white font-semibold shadow-sm transition-all flex items-center justify-center gap-3 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
-          onClick={iniciarEscaneo}
-        >
-          <svg
-            className="w-7 h-7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-            />
-            <circle cx="12" cy="13" r="4" />
-          </svg>
-          <span className="text-lg">Escanear QR</span>
-        </button>
-      )}
+  // === RENDER ===
 
-      {/* Visor con marco */}
-      {scanning && (
-        <div className="space-y-3">
-          <div className="relative rounded-2xl overflow-hidden border border-slate-300 bg-black min-h-[320px]">
-            <div
-              id={containerId}
-              className="w-full h-full min-h-[320px]"
-            />
-            {/* Marco animado como guia visual */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 flex items-center justify-center"
-            >
-              <div className="relative w-[240px] h-[240px]">
-                <span className="absolute -top-0.5 -left-0.5 w-7 h-7 border-t-4 border-l-4 border-white rounded-tl-lg" />
-                <span className="absolute -top-0.5 -right-0.5 w-7 h-7 border-t-4 border-r-4 border-white rounded-tr-lg" />
-                <span className="absolute -bottom-0.5 -left-0.5 w-7 h-7 border-b-4 border-l-4 border-white rounded-bl-lg" />
-                <span className="absolute -bottom-0.5 -right-0.5 w-7 h-7 border-b-4 border-r-4 border-white rounded-br-lg" />
-              </div>
+  // Vista cámara
+  if (modo === "camara") {
+    return (
+      <div className="space-y-3">
+        <div className="relative rounded-2xl overflow-hidden border border-slate-300 bg-black min-h-[320px]">
+          <div id={containerId} className="w-full h-full min-h-[320px]" />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+          >
+            <div className="relative w-[240px] h-[240px]">
+              <span className="absolute -top-0.5 -left-0.5 w-7 h-7 border-t-4 border-l-4 border-white rounded-tl-lg" />
+              <span className="absolute -top-0.5 -right-0.5 w-7 h-7 border-t-4 border-r-4 border-white rounded-tr-lg" />
+              <span className="absolute -bottom-0.5 -left-0.5 w-7 h-7 border-b-4 border-l-4 border-white rounded-bl-lg" />
+              <span className="absolute -bottom-0.5 -right-0.5 w-7 h-7 border-b-4 border-r-4 border-white rounded-br-lg" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 text-center">
-            Centra el código QR dentro del marco.
+        </div>
+        <p className="text-xs text-slate-500 text-center">
+          Centra el código QR dentro del marco.
+        </p>
+        <button
+          type="button"
+          className="w-full h-11 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
+          onClick={cancelarCamara}
+        >
+          Cancelar
+        </button>
+      </div>
+    );
+  }
+
+  // Vista manual (input de código)
+  if (modo === "manual" && !resultado) {
+    return (
+      <form onSubmit={enviarManual} className="space-y-4">
+        <div>
+          <label
+            htmlFor="codigo-manual"
+            className="block text-sm font-medium text-slate-700 mb-1.5"
+          >
+            Código de la credencial
+          </label>
+          <input
+            id="codigo-manual"
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="off"
+            required
+            value={codigoManual}
+            onChange={(e) => setCodigoManual(e.target.value)}
+            placeholder="xxxx-xxxx-xxxx-xxxx-xxxx"
+            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 font-mono tracking-wide"
+          />
+          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+            Pega el código impreso en el QR o el enlace completo
+            (https://.../socio/...).
           </p>
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="text-sm bg-red-50 text-red-800 rounded-lg p-3 border border-red-200"
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-2">
           <button
             type="button"
-            className="w-full h-[48px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
-            onClick={cancelarEscaneo}
+            onClick={reiniciar}
+            className="h-[52px] px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium transition-colors"
           >
-            Cancelar
+            Volver
+          </button>
+          <button
+            type="submit"
+            disabled={cargando || !codigoManual.trim()}
+            className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
+          >
+            {cargando ? "Validando…" : "Validar credencial"}
           </button>
         </div>
+      </form>
+    );
+  }
+
+  // Resultado o estado inicial
+  return (
+    <div className="space-y-4">
+      {!resultado && !cargando && (
+        <>
+          <button
+            type="button"
+            className="w-full h-[72px] rounded-2xl bg-brand-700 hover:bg-brand-900 text-white font-semibold shadow-sm transition-all flex items-center justify-center gap-3 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
+            onClick={iniciarCamara}
+          >
+            <svg
+              className="w-7 h-7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+              />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <span className="text-lg">Escanear código QR</span>
+          </button>
+
+          <div className="relative py-1">
+            <div
+              className="absolute inset-x-0 top-1/2 h-px bg-slate-200"
+              aria-hidden="true"
+            />
+            <span className="relative mx-auto block w-max bg-white px-3 text-xs uppercase tracking-widest text-slate-400">
+              o
+            </span>
+          </div>
+
+          <button
+            type="button"
+            className="w-full h-[52px] rounded-xl bg-white border border-slate-300 hover:border-slate-400 hover:bg-slate-50 text-slate-700 text-sm font-medium transition-colors"
+            onClick={abrirManual}
+          >
+            Ingresar código manualmente
+          </button>
+        </>
       )}
 
-      {/* Cargando */}
       {cargando && (
         <div className="rounded-2xl bg-white border border-slate-200 text-center text-sm text-slate-600 py-10 flex flex-col items-center gap-2">
           <svg
@@ -187,14 +284,14 @@ export function ValidadorClient() {
               strokeLinecap="round"
             />
           </svg>
-          Validando…
+          Validando credencial…
         </div>
       )}
 
-      {/* Resultado: activo */}
-      {resultado?.estado === "activo" && (
-        <div className="rounded-2xl border-2 border-green-500 bg-green-50 p-5 space-y-3">
-          <div className="flex items-center gap-3">
+      {/* Credencial válida */}
+      {resultado?.valid === true && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 overflow-hidden">
+          <div className="px-5 pt-5 pb-3 flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
               <svg
                 className="w-7 h-7 text-green-700"
@@ -212,56 +309,50 @@ export function ValidadorClient() {
               </svg>
             </div>
             <div className="min-w-0">
-              <div className="text-lg font-bold text-green-900 leading-tight">
-                Socio activo
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-green-800">
+                Socio vigente
               </div>
-              <div className="text-xs text-green-800">
-                Período {resultado.periodo}
+              <div className="text-xl font-semibold text-slate-900 leading-tight truncate">
+                {resultado.displayName}
               </div>
             </div>
+            <span className="ml-auto inline-flex items-center h-6 px-2 rounded-full bg-white border border-green-300 text-[11px] font-semibold text-green-800">
+              Año {resultado.periodo}
+            </span>
           </div>
-
-          <div className="pt-3 border-t border-green-200 space-y-3 text-sm text-slate-800">
+          <dl className="grid grid-cols-2 gap-y-3 gap-x-4 px-5 pb-5 pt-3 border-t border-green-200">
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-medium">
-                Familia
-              </div>
-              <div className="font-semibold text-slate-900 mt-0.5">
-                {resultado.apoderado}
-              </div>
+              <dt className="text-[11px] uppercase tracking-wider text-slate-500 font-medium">
+                Estado
+              </dt>
+              <dd className="text-sm font-semibold text-slate-900 mt-0.5">
+                {resultado.status}
+              </dd>
             </div>
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-500 font-medium">
-                {resultado.hijos.length > 1 ? "Alumnos" : "Alumno"}
-              </div>
-              <ul className="mt-1 space-y-0.5">
-                {resultado.hijos.map((h, i) => (
-                  <li key={i}>
-                    <span className="font-medium text-slate-900">
-                      {h.nombre}
-                    </span>
-                    {h.curso && (
-                      <span className="text-slate-500"> · {h.curso}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <dt className="text-[11px] uppercase tracking-wider text-slate-500 font-medium">
+                Vigencia
+              </dt>
+              <dd className="text-sm font-semibold text-slate-900 mt-0.5">
+                {resultado.validUntil}
+              </dd>
             </div>
-          </div>
-
-          {resultado.pagadaEn && (
-            <p className="text-[11px] text-green-800 pt-2 border-t border-green-200">
-              Pago registrado el{" "}
-              {new Date(resultado.pagadaEn).toLocaleDateString("es-CL")}
-            </p>
-          )}
+            <div className="col-span-2">
+              <dt className="text-[11px] uppercase tracking-wider text-slate-500 font-medium">
+                Categoría
+              </dt>
+              <dd className="text-sm font-semibold text-slate-900 mt-0.5">
+                {resultado.category}
+              </dd>
+            </div>
+          </dl>
         </div>
       )}
 
-      {/* Resultado: no valido */}
-      {resultado?.estado === "no_valido" && (
-        <div className="rounded-2xl border-2 border-red-400 bg-red-50 p-5 space-y-3">
-          <div className="flex items-center gap-3">
+      {/* Credencial no válida — mensaje genérico */}
+      {resultado?.valid === false && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 overflow-hidden">
+          <div className="px-5 py-5 flex items-start gap-3">
             <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
               <svg
                 className="w-7 h-7 text-red-700"
@@ -278,18 +369,18 @@ export function ValidadorClient() {
                 />
               </svg>
             </div>
-            <div className="min-w-0">
-              <div className="text-lg font-bold text-red-900 leading-tight">
-                QR no válido
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-red-800">
+                Credencial no válida
               </div>
-              <div className="text-xs text-red-800">
-                No se puede acreditar la membresía
+              <div className="text-lg font-semibold text-slate-900 leading-tight mt-0.5">
+                Credencial inválida
               </div>
+              <p className="text-sm text-slate-700 mt-2">
+                {resultado.motivo}
+              </p>
             </div>
           </div>
-          <p className="text-sm text-red-800 pt-2 border-t border-red-200">
-            {resultado.motivo}
-          </p>
         </div>
       )}
 
@@ -297,7 +388,7 @@ export function ValidadorClient() {
         <button
           type="button"
           className="w-full h-[54px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
-          onClick={escanearOtro}
+          onClick={reiniciar}
         >
           <svg
             className="w-5 h-5"
@@ -314,7 +405,7 @@ export function ValidadorClient() {
             />
             <circle cx="12" cy="13" r="4" />
           </svg>
-          Escanear otro
+          Validar otra credencial
         </button>
       )}
 
