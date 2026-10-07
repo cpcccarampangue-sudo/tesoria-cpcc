@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import type { SocioConfig } from "@/lib/types";
+import { precioVigente } from "@/lib/socios/precio";
 import { CURSO_GRUPOS, CURSO_LETRAS } from "@/lib/cursos";
 import {
   solicitarOtp,
@@ -564,7 +565,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
             Monto a pagar
           </div>
           <div className="text-2xl font-semibold text-brand-900 mt-0.5">
-            ${config.monto_cuota.toLocaleString("es-CL")} CLP
+            ${precioVigente(config).toLocaleString("es-CL")} CLP
           </div>
           <div className="text-xs text-slate-600 mt-1">
             Cuota socio {config.periodo_anio}
@@ -791,7 +792,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           Monto a pagar
         </div>
         <div className="text-2xl font-semibold text-brand-900 mt-0.5">
-          ${config.monto_cuota.toLocaleString("es-CL")} CLP
+          ${precioVigente(config).toLocaleString("es-CL")} CLP
         </div>
         <div className="text-xs text-slate-600 mt-1">
           Cuota socio {config.periodo_anio}

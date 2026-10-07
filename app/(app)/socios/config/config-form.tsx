@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { SocioConfig } from "@/lib/types";
 import { actualizarSocioConfig } from "../actions";
+import { utcToChileLocal } from "@/lib/tz-chile";
+import { precioVigente } from "@/lib/socios/precio";
 
 type CuentaOp = { id: string; nombre: string; es_principal: boolean };
 type CategoriaOp = { id: string; nombre: string };
@@ -23,26 +25,95 @@ export function ConfigForm({
     periodo_anio: String(config.periodo_anio),
     periodo_inicio: config.periodo_inicio ?? "",
     periodo_fin: config.periodo_fin ?? "",
-    monto_cuota: String(config.monto_cuota),
+    monto_cuota_normal: String(config.monto_cuota_normal ?? ""),
+    monto_cuota_promocional: String(config.monto_cuota_promocional ?? ""),
+    promocion_inicio: utcToChileLocal(config.promocion_inicio),
+    promocion_fin: utcToChileLocal(config.promocion_fin),
     sumup_link: config.sumup_link ?? "",
     cuenta_sumup_id: config.cuenta_sumup_id ?? "",
     categoria_cuota_id: config.categoria_cuota_id ?? "",
     mensaje_bienvenida: config.mensaje_bienvenida ?? "",
   });
 
+  // Preview del precio que se cobraria ahora mismo con lo que esta en el
+  // formulario. Util para que la directiva vea cual es el precio vigente
+  // antes de guardar.
+  const preview = useMemo(() => {
+    const normal = parseInt(form.monto_cuota_normal, 10);
+    const promo = form.monto_cuota_promocional
+      ? parseInt(form.monto_cuota_promocional, 10)
+      : null;
+    const cfgPreview: SocioConfig = {
+      ...config,
+      monto_cuota_normal: Number.isFinite(normal) && normal > 0 ? normal : null,
+      monto_cuota_promocional:
+        promo && Number.isFinite(promo) && promo > 0 ? promo : null,
+      promocion_inicio: form.promocion_inicio
+        ? // Nota: aqui pasamos el string local; precioVigente lo tratara
+          // como UTC si no tiene tz. Para el preview es suficiente — el
+          // calculo definitivo lo hace el servidor.
+          form.promocion_inicio
+        : null,
+      promocion_fin: form.promocion_fin ? form.promocion_fin : null,
+    };
+    try {
+      return precioVigente(cfgPreview);
+    } catch {
+      return null;
+    }
+  }, [config, form.monto_cuota_normal, form.monto_cuota_promocional, form.promocion_inicio, form.promocion_fin]);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccess(null);
     const periodoAnio = parseInt(form.periodo_anio, 10);
-    const montoCuota = parseInt(form.monto_cuota, 10);
+    const montoNormal = parseInt(form.monto_cuota_normal, 10);
+    const montoPromo = form.monto_cuota_promocional.trim()
+      ? parseInt(form.monto_cuota_promocional, 10)
+      : null;
     if (!Number.isInteger(periodoAnio) || periodoAnio < 2020) {
       setError("Año inválido.");
       return;
     }
-    if (!Number.isInteger(montoCuota) || montoCuota <= 0) {
-      setError("Monto inválido.");
+    if (!Number.isInteger(montoNormal) || montoNormal <= 0) {
+      setError("El precio normal debe ser un entero positivo.");
       return;
+    }
+    // Promo: si hay cualquier campo, deben estar los 3 (precio + inicio + fin).
+    const hayAlgoPromo =
+      montoPromo !== null ||
+      form.promocion_inicio.trim() !== "" ||
+      form.promocion_fin.trim() !== "";
+    if (hayAlgoPromo) {
+      if (
+        montoPromo === null ||
+        !Number.isInteger(montoPromo) ||
+        montoPromo <= 0
+      ) {
+        setError(
+          "Si configuras una promoción, el precio promocional debe ser un entero positivo."
+        );
+        return;
+      }
+      if (montoPromo > montoNormal) {
+        setError(
+          "El precio promocional no puede ser mayor que el precio normal."
+        );
+        return;
+      }
+      if (!form.promocion_inicio.trim() || !form.promocion_fin.trim()) {
+        setError(
+          "Si configuras una promoción, define las fechas de inicio y fin."
+        );
+        return;
+      }
+      if (form.promocion_inicio >= form.promocion_fin) {
+        setError(
+          "La fecha de inicio de la promoción debe ser anterior a la fecha de fin."
+        );
+        return;
+      }
     }
     startTransition(async () => {
       try {
@@ -50,7 +121,10 @@ export function ConfigForm({
           periodo_anio: periodoAnio,
           periodo_inicio: form.periodo_inicio || null,
           periodo_fin: form.periodo_fin || null,
-          monto_cuota: montoCuota,
+          monto_cuota_normal: montoNormal,
+          monto_cuota_promocional: hayAlgoPromo ? montoPromo : null,
+          promocion_inicio: hayAlgoPromo ? form.promocion_inicio : null,
+          promocion_fin: hayAlgoPromo ? form.promocion_fin : null,
           sumup_link: form.sumup_link.trim() || null,
           cuenta_sumup_id: form.cuenta_sumup_id || null,
           categoria_cuota_id: form.categoria_cuota_id || null,
@@ -116,23 +190,97 @@ export function ConfigForm({
         </div>
       </div>
 
-      <div>
-        <label className="label">Monto de la cuota (CLP)</label>
-        <input
-          type="number"
-          className="input"
-          value={form.monto_cuota}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, monto_cuota: e.target.value }))
-          }
-          min={0}
-          step={100}
-          required
-        />
-        <p className="text-xs text-slate-500 mt-1">
-          Lo que debe pagar cada familia para incorporarse al período.
+      <div className="border-t border-slate-200 pt-3">
+        <h3 className="font-medium text-slate-800">
+          Precio de la cuota
+        </h3>
+        <p className="text-xs text-slate-500 mb-3 mt-1">
+          El servidor cobra siempre el precio vigente según la fecha. Si
+          no configuras promoción, se cobra el precio normal.
         </p>
+
+        <div>
+          <label className="label">Precio normal (CLP)</label>
+          <input
+            type="number"
+            className="input"
+            value={form.monto_cuota_normal}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, monto_cuota_normal: e.target.value }))
+            }
+            min={1}
+            step={100}
+            required
+            placeholder="20000"
+          />
+        </div>
+
+        <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+            Promoción (opcional)
+          </div>
+          <div>
+            <label className="label">Precio promocional (CLP)</label>
+            <input
+              type="number"
+              className="input"
+              value={form.monto_cuota_promocional}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  monto_cuota_promocional: e.target.value,
+                }))
+              }
+              min={1}
+              step={100}
+              placeholder="18500"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">
+                Promoción desde (hora de Chile)
+              </label>
+              <input
+                type="datetime-local"
+                step={1}
+                className="input"
+                value={form.promocion_inicio}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, promocion_inicio: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <label className="label">
+                Promoción hasta (exclusivo; hora de Chile)
+              </label>
+              <input
+                type="datetime-local"
+                step={1}
+                className="input"
+                value={form.promocion_fin}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, promocion_fin: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <p className="text-xs text-slate-500">
+            La promoción aplica desde el inicio inclusivo hasta el fin{" "}
+            <strong>exclusivo</strong>. Para que la promoción cubra todo el
+            31/12 y el precio normal arranque el 01/01 a las 00:00, define
+            fin = <code>2027-01-01 00:00:00</code>.
+          </p>
+        </div>
       </div>
+
+      {preview !== null && (
+        <div className="rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-900 p-3">
+          Precio vigente que se cobraría ahora mismo con esta configuración:{" "}
+          <strong>${preview.toLocaleString("es-CL")} CLP</strong>
+        </div>
+      )}
 
       <div>
         <label className="label">Link de pago SumUp (fallback)</label>

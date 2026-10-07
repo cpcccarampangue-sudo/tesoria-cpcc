@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { SocioConfig } from "@/lib/types";
+import { precioVigente } from "@/lib/socios/precio";
 import { buscarFamiliasAdmin, crearSocioConPagoManual } from "../actions";
 import type { FamiliaCandidataAdmin } from "../tipos";
 
@@ -247,7 +248,7 @@ export function NuevoSocioForm({
       <div className="border-t border-slate-200 pt-3">
         <h3 className="font-medium text-slate-800 mb-2">Datos del pago</h3>
         <div className="rounded-md bg-amber-50 border border-amber-200 p-2 text-xs text-amber-900 mb-3">
-          Monto: <strong>${config.monto_cuota.toLocaleString("es-CL")} CLP</strong>{" "}
+          Monto: <strong>${precioVigente(config).toLocaleString("es-CL")} CLP</strong>{" "}
           · Socio {config.periodo_anio}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

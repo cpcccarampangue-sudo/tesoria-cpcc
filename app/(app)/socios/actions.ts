@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
-import type { Apoderado, Contacto, Estudiante } from "@/lib/types";
+import { precioVigente } from "@/lib/socios/precio";
+import { chileLocalToUtc } from "@/lib/tz-chile";
+import type { Apoderado, Contacto, Estudiante, SocioConfig } from "@/lib/types";
 import type {
   FamiliaCandidataAdmin,
   ResultadoBusquedaAdmin,
@@ -145,7 +147,11 @@ export type ActualizarConfigInput = {
   periodo_anio: number;
   periodo_inicio: string | null; // "YYYY-MM-DD"
   periodo_fin: string | null;
-  monto_cuota: number;
+  monto_cuota_normal: number;
+  // Promo opcional: los 3 vienen juntos o los 3 null.
+  monto_cuota_promocional: number | null;
+  promocion_inicio: string | null; // "YYYY-MM-DDTHH:mm[:ss]" en hora de Chile
+  promocion_fin: string | null;
   sumup_link: string | null;
   cuenta_sumup_id: string | null;
   categoria_cuota_id: string | null;
@@ -162,6 +168,49 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
       );
     }
   }
+  if (!Number.isInteger(input.monto_cuota_normal) || input.monto_cuota_normal <= 0) {
+    throw new Error("El precio normal debe ser un entero positivo.");
+  }
+  // Promo coherente: o los 3 o ninguno.
+  const promoCampos = [
+    input.monto_cuota_promocional,
+    input.promocion_inicio,
+    input.promocion_fin,
+  ];
+  const promoLlenos = promoCampos.filter((v) => v !== null && v !== "").length;
+  if (promoLlenos !== 0 && promoLlenos !== 3) {
+    throw new Error(
+      "Si configuras una promoción, debes definir precio promocional + inicio + fin (o dejar los tres en blanco)."
+    );
+  }
+  let promoInicioUtc: string | null = null;
+  let promoFinUtc: string | null = null;
+  if (promoLlenos === 3) {
+    if (
+      !Number.isInteger(input.monto_cuota_promocional!) ||
+      input.monto_cuota_promocional! <= 0
+    ) {
+      throw new Error("El precio promocional debe ser un entero positivo.");
+    }
+    if (input.monto_cuota_promocional! > input.monto_cuota_normal) {
+      throw new Error(
+        "El precio promocional no puede ser mayor que el precio normal."
+      );
+    }
+    // Interpretar strings locales como hora de Chile y pasarlos a UTC.
+    const iniLocal = chileLocalToUtc(input.promocion_inicio);
+    const finLocal = chileLocalToUtc(input.promocion_fin);
+    if (!iniLocal || !finLocal) {
+      throw new Error("Fechas de promoción inválidas.");
+    }
+    if (finLocal <= iniLocal) {
+      throw new Error(
+        "La fecha de inicio de la promoción debe ser anterior a la fecha de fin."
+      );
+    }
+    promoInicioUtc = iniLocal.toISOString();
+    promoFinUtc = finLocal.toISOString();
+  }
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("socio_config")
@@ -169,7 +218,11 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
       periodo_anio: input.periodo_anio,
       periodo_inicio: input.periodo_inicio,
       periodo_fin: input.periodo_fin,
-      monto_cuota: input.monto_cuota,
+      monto_cuota_normal: input.monto_cuota_normal,
+      monto_cuota_promocional:
+        promoLlenos === 3 ? input.monto_cuota_promocional : null,
+      promocion_inicio: promoInicioUtc,
+      promocion_fin: promoFinUtc,
       sumup_link: input.sumup_link,
       cuenta_sumup_id: input.cuenta_sumup_id,
       categoria_cuota_id: input.categoria_cuota_id,
@@ -181,6 +234,7 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   revalidatePath("/socios");
   revalidatePath("/socios/config");
   revalidatePath("/incorporacion");
+  revalidatePath("/socios/nuevo");
 }
 
 // Crea una solicitud de socio + registra el pago en el mismo paso, sin
@@ -241,12 +295,10 @@ export async function crearSocioConPagoManual(
     .select("*")
     .eq("id", 1)
     .maybeSingle();
-  const config = cfgData as {
-    periodo_anio: number;
-    monto_cuota: number;
-    categoria_cuota_id: string | null;
-  } | null;
+  const config = cfgData as SocioConfig | null;
   if (!config) throw new Error("Sistema de socios no está configurado.");
+  // Precio decidido en servidor segun promo vigente ahora.
+  const monto = precioVigente(config);
 
   // Verificar duplicado: misma familia + periodo + estado activo
   const { data: existenteData } = await supabase
@@ -279,7 +331,7 @@ export async function crearSocioConPagoManual(
     .insert({
       fecha: input.fecha,
       tipo: "ingreso",
-      monto: config.monto_cuota,
+      monto,
       descripcion,
       categoria_id: config.categoria_cuota_id,
       cuenta_id: input.cuenta_id,
@@ -312,7 +364,7 @@ export async function crearSocioConPagoManual(
       apoderado_telefono: input.apoderado_telefono?.trim() || null,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
-      monto_cuota: config.monto_cuota,
+      monto_cuota: monto,
       estado: "pagada",
       pagada_en: new Date(input.fecha).toISOString(),
       movimiento_id: movData.id,

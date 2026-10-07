@@ -300,7 +300,18 @@ export type SocioConfig = {
   periodo_anio: number;
   periodo_inicio: string | null; // "YYYY-MM-DD"
   periodo_fin: string | null; // "YYYY-MM-DD"
+  /**
+   * @deprecated 2026-10-07. Usar monto_cuota_normal + monto_cuota_promocional
+   * + promocion_inicio/fin. Columna conservada en DB para rollback; se
+   * eliminara en una migracion futura.
+   */
   monto_cuota: number;
+  // Pricing (migracion 024_socio_config_promocion). precioVigente()
+  // resuelve el precio efectivo en servidor usando estos campos.
+  monto_cuota_normal: number | null;
+  monto_cuota_promocional: number | null;
+  promocion_inicio: string | null; // ISO timestamptz
+  promocion_fin: string | null; // ISO timestamptz
   sumup_link: string | null;
   sumup_checkout_fijo: boolean;
   cuenta_sumup_id: string | null;

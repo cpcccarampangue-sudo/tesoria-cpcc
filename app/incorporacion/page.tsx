@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SocioConfig } from "@/lib/types";
+import { precioVigente } from "@/lib/socios/precio";
 import { IncorporacionForm } from "./incorporacion-form";
 import { PublicHeader } from "@/components/public-header";
 import { PublicFooter } from "@/components/public-footer";
@@ -35,6 +36,10 @@ export default async function IncorporacionPage() {
     periodo_inicio: null,
     periodo_fin: null,
     monto_cuota: 20000,
+    monto_cuota_normal: 20000,
+    monto_cuota_promocional: null,
+    promocion_inicio: null,
+    promocion_fin: null,
     sumup_link: null,
     sumup_checkout_fijo: false,
     cuenta_sumup_id: null,
@@ -196,7 +201,7 @@ export default async function IncorporacionPage() {
               />
             </svg>
             Conexión segura. Cuota $
-            {config.monto_cuota.toLocaleString("es-CL")} CLP por familia.
+            {precioVigente(config).toLocaleString("es-CL")} CLP por familia.
           </p>
         </section>
       </div>

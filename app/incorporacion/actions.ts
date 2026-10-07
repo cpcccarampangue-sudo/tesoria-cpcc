@@ -23,6 +23,7 @@ import { siteUrl } from "@/lib/qr";
 import { todosLosCursos } from "@/lib/cursos";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { normalizarEmail } from "@/lib/normalizar";
+import { precioVigente } from "@/lib/socios/precio";
 
 // Reexportamos desde el helper no-server para que la UI pueda importar
 // detectarTipoBusqueda y los masks sin problemas de "use server".
@@ -323,6 +324,8 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   const alumnoRepr = estudiantes.map((e) => e.nombre).join(", ");
   const cursoRepr = estudiantes.map((e) => e.curso ?? "—").join(", ");
 
+  // Precio decidido en servidor segun promocion vigente ahora.
+  const monto = precioVigente(config);
   const { data: nueva, error } = await supabase
     .from("socio_solicitudes")
     .insert({
@@ -334,7 +337,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
       // Monto SIEMPRE del servidor, nunca del cliente.
-      monto_cuota: config.monto_cuota,
+      monto_cuota: monto,
     })
     .select("id, qr_token")
     .single();
@@ -447,6 +450,8 @@ export async function crearSolicitudManualSocio(
     );
   }
 
+  // Precio decidido en servidor segun promocion vigente ahora.
+  const monto = precioVigente(config);
   const { data: nueva, error } = await supabase
     .from("socio_solicitudes")
     .insert({
@@ -459,7 +464,7 @@ export async function crearSolicitudManualSocio(
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
       // Monto SIEMPRE del servidor.
-      monto_cuota: config.monto_cuota,
+      monto_cuota: monto,
       estado: "pendiente_match",
     })
     .select("id, qr_token")
@@ -745,7 +750,8 @@ async function intentarRedirigirACheckout(
     const supabase = createSupabaseAdminClient();
     const checkout = await crearCheckout({
       checkoutReference: `socio_${solicitud.id}`,
-      amount: config.monto_cuota,
+      // amount decidido server-side en el mismo instante que la solicitud.
+      amount: precioVigente(config),
       currency: "CLP",
       description: `Cuota socio CdP ${config.periodo_anio} - ${nombreFamilia}`,
       returnUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
