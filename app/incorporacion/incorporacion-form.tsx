@@ -112,7 +112,6 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       return;
     }
     if (s.caso === "nuevo") {
-      setPaso({ nombre: "nuevo" as never, email: s.email });
       setManual((m) => ({ ...m, apoderado_nombre: "" }));
       setHijos([{ nombre: "", curso: "" }]);
       setPaso({ nombre: "manual", email: s.email });
