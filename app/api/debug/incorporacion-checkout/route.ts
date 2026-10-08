@@ -1,37 +1,24 @@
 // Endpoint TEMPORAL de diagnostico para /incorporacion/pago.
 // Protegido con requireDirectiva. Lee UNA solicitud existente por
-// qr_token (no la modifica), reproduce el POST /v0.1/checkouts con los
-// MISMOS valores que usa resolverUrlCheckout, y devuelve:
-//   - request body enviado a SumUp (sin API key)
-//   - response de SumUp: status + body sanitizado
-//   - sumup_checkout_id actual de la solicitud (si quedo NULL o algun ID)
+// qr_token (no la modifica). SOLO consulta el checkout live en SumUp
+// usando el sumup_checkout_id ya guardado — nunca hace POST, nunca
+// crea otro checkout. Devuelve el estado live para validar que el fix
+// idempotente reutiliza el checkout existente.
 //
-// NO toca la solicitud, NO guarda sumup_checkout_id, NO crea otra solicitud,
-// NO envia correo, NO toca QR ni socio_periodo. Si crearCheckout tiene exito,
-// el checkout queda huerfano en SumUp pero no se persiste en nuestra DB.
+// NO modifica la solicitud, NO crea checkout, NO envia correo, NO toca
+// QR ni socio_periodo, NO usa Payment Link fijo.
 //
 // Uso: GET /api/debug/incorporacion-checkout?token=<qr_token>
-// Eliminar cuando el bug este diagnosticado.
+// Eliminar cuando el fix este validado.
 
 import { NextResponse } from "next/server";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { siteUrl } from "@/lib/qr";
+import { obtenerCheckout, SumUpError } from "@/lib/sumup/client";
 import type { SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-const API_BASE = "https://api.sumup.com/v0.1";
-
-function sanitize(text: string): string {
-  const t = text.trim();
-  if (t.length === 0) return "<empty>";
-  return t.length > 1000 ? t.slice(0, 1000) + "…" : t;
-}
-
-// Enmascara PII para que el response se pueda pegar en el chat.
-// Preserva lo que necesita el diagnostico (longitud, formato basico)
-// pero oculta identidad.
 function maskId(id: string | null | undefined): string {
   if (!id) return "<null>";
   return id.length <= 8 ? "***" : `${id.slice(0, 8)}…`;
@@ -45,9 +32,7 @@ function maskEmail(e: string | null | undefined): string {
   const userMask = user.length <= 2 ? "*" : user[0] + "***";
   const dot = dom.lastIndexOf(".");
   const domMask =
-    dot > 0
-      ? dom[0] + "***" + dom.slice(dot)
-      : dom[0] + "***";
+    dot > 0 ? dom[0] + "***" + dom.slice(dot) : dom[0] + "***";
   return `${userMask}@${domMask}`;
 }
 function maskName(n: string | null | undefined): string {
@@ -57,18 +42,8 @@ function maskName(n: string | null | undefined): string {
     .map((w) => (w.length <= 1 ? w : w[0] + "***"))
     .join(" ");
 }
-// Para el redirect_url que lleva el token embebido.
 function maskUrlToken(url: string): string {
   return url.replace(/token=([^&]+)/, (_, t) => `token=${maskId(t)}`);
-}
-
-function webhookNotificationUrl(): string {
-  const explicit = process.env.SUMUP_WEBHOOK_URL;
-  if (explicit) return explicit;
-  const site =
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    "https://tesoria-cpcc.vercel.app";
-  return `${site.replace(/\/$/, "")}/api/webhooks/sumup`;
 }
 
 export async function GET(req: Request) {
@@ -103,8 +78,6 @@ export async function GET(req: Request) {
   }
   const solicitud = solData as SocioSolicitud;
 
-  // Snapshot del estado actual de la solicitud (antes de intentar nada).
-  // PII enmascarada para que se pueda pegar el JSON en un chat.
   const solicitudSnapshot = {
     id_mask: maskId(solicitud.id),
     qr_token_mask: maskId(solicitud.qr_token),
@@ -117,159 +90,99 @@ export async function GET(req: Request) {
     created_at: solicitud.created_at,
   };
 
-  const apiKey = process.env.SUMUP_API_KEY;
-  const merchantCode = process.env.SUMUP_MERCHANT_CODE;
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        ok: false,
-        step: "env",
-        error: "SUMUP_API_KEY no esta seteada en el env de produccion.",
-        solicitud: solicitudSnapshot,
-      },
-      { status: 500 }
-    );
-  }
-  if (!merchantCode) {
-    return NextResponse.json(
-      {
-        ok: false,
-        step: "env",
-        error: "SUMUP_MERCHANT_CODE no esta seteada.",
-        solicitud: solicitudSnapshot,
-      },
-      { status: 500 }
-    );
-  }
-
-  // Reproducimos EL MISMO body que arma lib/sumup/client.crearCheckout()
-  // llamado desde pago/page.tsx::resolverUrlCheckout.
-  const checkout_reference = `socio_${solicitud.id}`;
-  const body: Record<string, unknown> = {
-    checkout_reference,
-    amount: solicitud.monto_cuota,
-    currency: "CLP",
-    merchant_code: merchantCode,
-    description: `Cuota socio CdP ${solicitud.periodo_anio} - ${solicitud.apoderado_nombre}`,
-    return_url: webhookNotificationUrl(),
-    pay_to_email: solicitud.apoderado_email,
-    personal_details: { first_name: solicitud.apoderado_nombre },
-    hosted_checkout: { enabled: true },
-    redirect_url: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
-  };
-
-  // Request body: devolvemos todos los campos, pero enmascarando PII
-  // en los que pueden identificar a la familia. Preserva longitudes,
-  // monto, currency, merchant_code, return_url (publico) y los flags.
-  const bodySanitized: Record<string, unknown> = {
-    checkout_reference: `socio_${maskId(solicitud.id)}`,
-    amount: body.amount,
-    currency: body.currency,
-    merchant_code: body.merchant_code,
-    description: `Cuota socio CdP ${solicitud.periodo_anio} - ${maskName(solicitud.apoderado_nombre)}`,
-    return_url: body.return_url,
-    pay_to_email: maskEmail(solicitud.apoderado_email),
-    personal_details: { first_name: maskName(solicitud.apoderado_nombre) },
-    hosted_checkout: body.hosted_checkout,
-    redirect_url: maskUrlToken(body.redirect_url as string),
-  };
-  const requestEnviado = {
-    url: `${API_BASE}/checkouts`,
-    method: "POST",
-    body: bodySanitized,
-  };
-
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/checkouts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
+  if (!solicitud.sumup_checkout_id) {
+    return NextResponse.json({
+      ok: true,
+      modo: "sin_checkout_id",
+      solicitud: solicitudSnapshot,
+      nota:
+        "La solicitud no tiene sumup_checkout_id guardado. No hay checkout live que consultar. " +
+        "Al visitar /incorporacion/pago?token=... el flujo idempotente creara uno nuevo con reference base.",
     });
+  }
+
+  // GET live del checkout ya asociado. Nunca hacemos POST aqui.
+  let live;
+  try {
+    live = await obtenerCheckout(solicitud.sumup_checkout_id);
   } catch (err) {
+    const detail =
+      err instanceof SumUpError
+        ? {
+            status: err.status,
+            path: err.path,
+            method: err.method,
+            message: err.message,
+          }
+        : { message: err instanceof Error ? err.message : String(err) };
     return NextResponse.json(
       {
         ok: false,
-        step: "fetch_sumup",
-        error:
-          err instanceof Error
-            ? `${err.name}: ${err.message}`
-            : String(err),
+        modo: "get_live_fallido",
+        checkout_id_consultado: solicitud.sumup_checkout_id,
+        error: detail,
         solicitud: solicitudSnapshot,
-        request_enviado: requestEnviado,
       },
       { status: 502 }
     );
   }
 
-  const bodyText = await res.text();
+  // Validacion de coherencia contra la solicitud (misma que hace
+  // resolverUrlCheckout en /incorporacion/pago).
+  const expectedMerchant = process.env.SUMUP_MERCHANT_CODE ?? null;
+  const refOk = (live.checkout_reference ?? "").startsWith(
+    `socio_${solicitud.id}`
+  );
+  const amountOk = Number(live.amount) === Number(solicitud.monto_cuota);
+  const currencyOk = live.currency === "CLP";
+  const merchantOk =
+    !expectedMerchant ||
+    !live.merchant_code ||
+    live.merchant_code === expectedMerchant;
 
-  // Response parseado (si JSON). Enmascaramos campos PII conocidos que
-  // SumUp a veces hace echo del request en el response.
-  let bodyParsed: unknown = null;
-  try {
-    bodyParsed = bodyText ? JSON.parse(bodyText) : null;
-  } catch {
-    bodyParsed = null;
-  }
-  if (bodyParsed && typeof bodyParsed === "object") {
-    const o = bodyParsed as Record<string, unknown>;
-    if (typeof o.checkout_reference === "string") {
-      o.checkout_reference = `socio_${maskId(solicitud.id)}`;
-    }
-    if (typeof o.description === "string") {
-      o.description = `Cuota socio CdP ${solicitud.periodo_anio} - ${maskName(solicitud.apoderado_nombre)}`;
-    }
-    if (typeof o.pay_to_email === "string") {
-      o.pay_to_email = maskEmail(solicitud.apoderado_email);
-    }
-    if (typeof o.redirect_url === "string") {
-      o.redirect_url = maskUrlToken(o.redirect_url);
-    }
-    if (o.personal_details && typeof o.personal_details === "object") {
-      const pd = o.personal_details as Record<string, unknown>;
-      if (typeof pd.first_name === "string") {
-        pd.first_name = maskName(solicitud.apoderado_nombre);
-      }
-    }
-  }
-  // El body_raw lo omitimos para no exponer PII sin enmascarar; si el
-  // response no fue JSON parseable, devolvemos un prefijo de 200 chars
-  // literal (SumUp en ese caso suele mandar HTML de error sin PII).
-  const bodyRawPreview = bodyParsed
-    ? "<json en body_parsed>"
-    : sanitize(bodyText.slice(0, 200));
+  // Enmascaramos la reference live por si lleva el UUID.
+  const liveRefMasked = live.checkout_reference
+    ? live.checkout_reference.replace(
+        /^socio_([^_]+)/,
+        (_, u: string) => `socio_${maskId(u)}`
+      )
+    : null;
 
-  // En caso de error, extraemos el detalle como lo haria el helper real.
-  let detail: string | undefined;
-  if (!res.ok && bodyParsed && typeof bodyParsed === "object") {
-    const o = bodyParsed as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof o.message === "string") parts.push(o.message);
-    if (typeof o.detail === "string") parts.push(o.detail);
-    if (typeof o.error_code === "string") parts.push(`code=${o.error_code}`);
-    if (typeof o.title === "string") parts.push(o.title);
-    detail = parts.join(" | ") || undefined;
-  }
+  const hostedUrl =
+    (live.hosted_checkout_url ?? live.checkout_url ?? null) || null;
+  const hostedUrlMasked = hostedUrl ? maskUrlToken(hostedUrl) : null;
 
   return NextResponse.json({
-    ok: res.ok,
-    sumup_response: {
-      status_code: res.status,
-      status_text: res.statusText,
-      body_raw_preview: bodyRawPreview,
-      body_parsed: bodyParsed,
-      detail_legible: detail,
+    ok: true,
+    modo: "get_live",
+    checkout_id_consultado: solicitud.sumup_checkout_id,
+    sumup_live: {
+      status: live.status,
+      checkout_reference_mask: liveRefMasked,
+      amount: live.amount,
+      currency: live.currency,
+      merchant_code: live.merchant_code ?? null,
+      hosted_checkout_url_mask: hostedUrlMasked,
     },
-    request_enviado: requestEnviado,
+    coherencia: {
+      refOk,
+      amountOk,
+      currencyOk,
+      merchantOk,
+      expected: {
+        reference_prefix: `socio_${maskId(solicitud.id)}`,
+        amount: solicitud.monto_cuota,
+        currency: "CLP",
+        merchant_code_env_set: expectedMerchant !== null,
+      },
+    },
     solicitud: solicitudSnapshot,
-    nota:
-      "Este endpoint NO modifico la solicitud. sumup_checkout_id_actual sigue como estaba. " +
-      "Si ok=true, se creo un checkout huerfano en SumUp (no persistido localmente).",
+    interpretacion:
+      live.status === "PENDING" && refOk && amountOk && currencyOk && merchantOk
+        ? "OK: el fix idempotente reutilizara este hosted_checkout_url en el proximo render de /incorporacion/pago. No se hara POST duplicado."
+        : live.status === "PAID"
+        ? "El checkout ya esta pagado en SumUp. UI mostrara 'ya pagada'; webhook debio marcar DB. No se crea otro."
+        : "Checkout en estado no reutilizable; el fix creara uno nuevo con reference versionada 'socio_<uuid>_r<ts>'.",
+    nota: "Endpoint SOLO-GET. No modifico la solicitud ni creo checkouts.",
   });
 }

@@ -4,7 +4,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { SocioSolicitud } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
-import { crearCheckout, obtenerCheckout } from "@/lib/sumup/client";
+import {
+  crearCheckout,
+  obtenerCheckout,
+  SumUpError,
+  describeSumUpError,
+} from "@/lib/sumup/client";
 import { siteUrl } from "@/lib/qr";
 import { AppFooter } from "@/components/app-footer";
 
@@ -18,58 +23,151 @@ function firstParam(raw: string | string[] | undefined): string {
   return raw ?? "";
 }
 
+// Resultado del helper de resolucion de checkout. Permite que la UI
+// decida sin ambiguedad entre: mostrar boton pagar, mostrar banner de
+// pagada (incluso si DB todavia no lo refleja porque el webhook esta en
+// vuelo), mostrar error de datos (mismatch grave) o error generico.
+type ResolucionCheckout =
+  | { tipo: "pendiente"; url: string }
+  | { tipo: "pagada_live" }
+  | { tipo: "mismatch"; detalle: string }
+  | { tipo: "error" };
+
+// Reference base. Cuando necesitamos recrear un checkout (porque el
+// anterior quedo FAILED/EXPIRED/CANCELED o el GET live devolvio 404),
+// agregamos un sufijo "_r<timestamp>" para no reutilizar la misma
+// reference y evitar 409 DUPLICATED_CHECKOUT. El webhook extrae el UUID
+// con regex, tolerando ambos formatos (ver /api/webhooks/sumup).
+function nuevaReference(solicitudId: string, esRetry: boolean): string {
+  return esRetry
+    ? `socio_${solicitudId}_r${Date.now()}`
+    : `socio_${solicitudId}`;
+}
+
 // Resuelve la URL del hosted checkout SumUp para una solicitud en
-// pendiente_pago. Reutiliza el checkout existente si sigue PENDING;
-// crea uno nuevo si no hay o el anterior ya no sirve. Devuelve null si
-// hubo cualquier error (la UI muestra aviso de contactar a la directiva).
+// pendiente_pago. Es IDEMPOTENTE:
+//   - Si ya hay sumup_checkout_id, hace GET live y decide segun el status.
+//   - Nunca reutiliza una misma reference para crear un segundo checkout
+//     (eso dispara 409 DUPLICATED_CHECKOUT en SumUp).
 async function resolverUrlCheckout(
   solicitud: SocioSolicitud
-): Promise<string | null> {
-  try {
-    // 1) Si ya hay checkout previo, verificar si sigue vivo.
-    if (solicitud.sumup_checkout_id) {
-      try {
-        const live = await obtenerCheckout(solicitud.sumup_checkout_id);
-        if (live.status === "PENDING") {
-          return live.hosted_checkout_url ?? live.checkout_url ?? null;
-        }
-        // EXPIRED / FAILED / CANCELED: creamos uno nuevo abajo.
-      } catch (err) {
-        console.error(
-          "[incorporacion/pago] obtenerCheckout fallo:",
-          err instanceof Error ? err.message : String(err)
-        );
-      }
+): Promise<ResolucionCheckout> {
+  const admin = createSupabaseAdminClient();
+  const expectedMerchant = process.env.SUMUP_MERCHANT_CODE;
+
+  // Caso 1: ya hay checkout guardado → GET live y decidir.
+  if (solicitud.sumup_checkout_id) {
+    let live;
+    try {
+      live = await obtenerCheckout(solicitud.sumup_checkout_id);
+    } catch (err) {
+      // 404 u otro error de GET live: el checkout no es consultable.
+      // No reutilizamos la reference anterior; creamos uno con sufijo.
+      console.error(
+        "[incorporacion/pago] obtenerCheckout fallo, se crea con reference versionada:",
+        err instanceof Error ? err.message : String(err)
+      );
+      return await crearYGuardar(solicitud, true);
     }
-    // 2) Crear nuevo checkout. amount proviene del snapshot
-    //    solicitud.monto_cuota (ya resuelto por precioVigente al crear
-    //    la solicitud). SumUp hosted_checkout:enabled devuelve una URL
-    //    lista para redirigir.
-    const checkout = await crearCheckout({
-      checkoutReference: `socio_${solicitud.id}`,
-      amount: solicitud.monto_cuota,
-      currency: "CLP",
-      description: `Cuota socio CdP ${solicitud.periodo_anio} - ${solicitud.apoderado_nombre}`,
-      // redirectUrl = retorno visual del browser tras hosted checkout
-      // (vuelve a esta misma pantalla, que mostrara el estado actual
-      // post-webhook). El return_url (webhook) lo pone el helper al
-      // dominio canonico de /api/webhooks/sumup.
-      redirectUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
-      payToEmail: solicitud.apoderado_email,
-      payerName: solicitud.apoderado_nombre,
-    });
-    const admin = createSupabaseAdminClient();
-    await admin
-      .from("socio_solicitudes")
-      .update({ sumup_checkout_id: checkout.id })
-      .eq("id", solicitud.id);
-    return checkout.hosted_checkout_url ?? checkout.checkout_url ?? null;
-  } catch (err) {
-    console.error(
-      "[incorporacion/pago] resolverUrlCheckout fallo:",
-      err instanceof Error ? err.message : String(err)
+
+    // Validar integridad del checkout live contra la solicitud.
+    const refOk = (live.checkout_reference ?? "").startsWith(
+      `socio_${solicitud.id}`
     );
-    return null;
+    const amountOk = Number(live.amount) === Number(solicitud.monto_cuota);
+    const currencyOk = live.currency === "CLP";
+    const merchantOk =
+      !expectedMerchant ||
+      !live.merchant_code ||
+      live.merchant_code === expectedMerchant;
+    if (!refOk || !amountOk || !currencyOk || !merchantOk) {
+      const detalle = `refOk=${refOk} amountOk=${amountOk} currencyOk=${currencyOk} merchantOk=${merchantOk} liveRef=${live.checkout_reference} liveAmount=${live.amount} liveCurrency=${live.currency} liveStatus=${live.status}`;
+      console.error(
+        "[incorporacion/pago] checkout live no coincide con solicitud:",
+        detalle
+      );
+      return { tipo: "mismatch", detalle };
+    }
+
+    if (live.status === "PENDING") {
+      const url = live.hosted_checkout_url ?? live.checkout_url ?? null;
+      return url ? { tipo: "pendiente", url } : { tipo: "error" };
+    }
+    if (live.status === "PAID") {
+      // No creamos otro. El webhook ya deberia haber actualizado DB; si
+      // esta en vuelo, el proximo refresh lo mostrara. UI pone banner.
+      return { tipo: "pagada_live" };
+    }
+    // FAILED / EXPIRED / CANCELED → crear uno nuevo con reference nueva.
+    return await crearYGuardar(solicitud, true);
+  }
+
+  // Caso 2: no hay checkout guardado → crear con reference base.
+  return await crearYGuardar(solicitud, false);
+
+  // Helper interno (closure sobre admin + expectedMerchant).
+  async function crearYGuardar(
+    s: SocioSolicitud,
+    esRetry: boolean
+  ): Promise<ResolucionCheckout> {
+    const checkoutReference = nuevaReference(s.id, esRetry);
+    try {
+      const checkout = await crearCheckout({
+        checkoutReference,
+        amount: s.monto_cuota,
+        currency: "CLP",
+        description: `Cuota socio CdP ${s.periodo_anio} - ${s.apoderado_nombre}`,
+        redirectUrl: `${siteUrl()}/incorporacion/pago?token=${s.qr_token}`,
+        payToEmail: s.apoderado_email,
+        payerName: s.apoderado_nombre,
+      });
+      // Guardamos inmediatamente antes de devolver la URL, para que un
+      // reload posterior encuentre el id y no vuelva a crear.
+      await admin
+        .from("socio_solicitudes")
+        .update({ sumup_checkout_id: checkout.id })
+        .eq("id", s.id);
+      const url =
+        checkout.hosted_checkout_url ?? checkout.checkout_url ?? null;
+      return url ? { tipo: "pendiente", url } : { tipo: "error" };
+    } catch (err) {
+      // Red de seguridad: si vino 409 DUPLICATED_CHECKOUT y tenemos
+      // sumup_checkout_id guardado, intentamos recuperar el checkout
+      // existente antes de rendirnos. Esto cubre el bug que llevo a
+      // esta solicitud al estado actual.
+      if (
+        err instanceof SumUpError &&
+        err.status === 409 &&
+        s.sumup_checkout_id
+      ) {
+        try {
+          const live = await obtenerCheckout(s.sumup_checkout_id);
+          if (live.status === "PENDING") {
+            const url =
+              live.hosted_checkout_url ?? live.checkout_url ?? null;
+            if (url) {
+              console.warn(
+                "[incorporacion/pago] 409 duplicated: recuperado checkout PENDING existente"
+              );
+              return { tipo: "pendiente", url };
+            }
+          }
+          if (live.status === "PAID") {
+            console.warn(
+              "[incorporacion/pago] 409 duplicated: checkout existente ya esta PAID"
+            );
+            return { tipo: "pagada_live" };
+          }
+        } catch {
+          // fallback al return error de abajo
+        }
+      }
+      console.error(
+        "[incorporacion/pago] crearCheckout fallo:",
+        describeSumUpError(err)
+      );
+      return { tipo: "error" };
+    }
   }
 }
 
@@ -92,13 +190,16 @@ export default async function PagoPage({
 
   if (!solicitud) notFound();
 
-  const yaPagada =
+  const yaPagadaDB =
     solicitud.estado === "pagada" || solicitud.estado === "enviada";
 
   // Si esta pendiente, generar/recuperar URL del checkout dinamico.
-  // Esta pagina NO marca pagada por si misma: solo refleja el estado
-  // actual de la solicitud en DB y expone el hosted checkout SumUp.
-  const checkoutUrl = yaPagada ? null : await resolverUrlCheckout(solicitud);
+  // Esta pagina NO marca pagada por si misma en DB: solo refleja el
+  // estado actual (DB o live) y expone el hosted checkout SumUp.
+  const resolucion = yaPagadaDB ? null : await resolverUrlCheckout(solicitud);
+  const yaPagada = yaPagadaDB || resolucion?.tipo === "pagada_live";
+  const checkoutUrl =
+    resolucion?.tipo === "pendiente" ? resolucion.url : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">

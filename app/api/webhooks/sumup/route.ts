@@ -184,9 +184,14 @@ async function procesarSocio(
 ): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
 
-  // Buscar solicitud por el id embebido en la reference. Fallback por
-  // sumup_checkout_id (puede diferir si el checkout fue recreado).
-  const solicitudId = refLive.replace(/^socio_/, "");
+  // Buscar solicitud por el UUID embebido en la reference. La reference
+  // puede ser "socio_<uuid>" o "socio_<uuid>_r<timestamp>" (retry al
+  // recrear un checkout tras FAILED/EXPIRED/CANCELED). Fallback adicional
+  // por sumup_checkout_id si no se puede parsear.
+  const matchUuid = refLive.match(
+    /^socio_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+  );
+  const solicitudId = matchUuid ? matchUuid[1] : refLive.replace(/^socio_/, "");
   const { data: byId } = await supabase
     .from("socio_solicitudes")
     .select("*")
