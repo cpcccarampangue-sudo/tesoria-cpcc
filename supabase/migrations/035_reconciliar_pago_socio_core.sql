@@ -105,12 +105,18 @@ BEGIN
     RETURN;
   END IF;
 
+  -- Reference permitida EXACTAMENTE:
+  --   socio_<uuid>
+  --   socio_<uuid>_r<digits>
+  -- Nada mas. Usamos regex ancla ^...$ con grupo opcional _r[0-9]+.
   IF p_live_checkout_reference IS NULL
-     OR NOT (p_live_checkout_reference LIKE 'socio_' || p_solicitud_id::text || '%') THEN
+     OR NOT (p_live_checkout_reference ~
+             ('^socio_' || p_solicitud_id::text || '(_r[0-9]+)?$')) THEN
     RETURN QUERY SELECT
       'mismatch'::text,
-      format('checkout_reference live (%s) no corresponde a socio_%s(_r<ts>)',
-        COALESCE(p_live_checkout_reference, 'NULL'), p_solicitud_id::text)::text,
+      format('checkout_reference live (%s) no corresponde a socio_%s o socio_%s_r<digits>',
+        COALESCE(p_live_checkout_reference, 'NULL'),
+        p_solicitud_id::text, p_solicitud_id::text)::text,
       NULL::uuid, v_sol.estado::text, false, false, false, false;
     RETURN;
   END IF;
@@ -132,13 +138,18 @@ BEGIN
     RETURN;
   END IF;
 
+  -- Si el server tiene SUMUP_MERCHANT_CODE configurado, el live DEBE
+  -- traer merchant_code y ser EXACTAMENTE igual. Live NULL = mismatch.
+  -- IS DISTINCT FROM maneja NULL correctamente:
+  --   'MC1' IS DISTINCT FROM NULL   -> true  (mismatch)
+  --   'MC1' IS DISTINCT FROM 'MC1'  -> false (match)
+  --   'MC1' IS DISTINCT FROM 'MC2'  -> true  (mismatch)
   IF p_expected_merchant_code IS NOT NULL
-     AND p_live_merchant_code IS NOT NULL
      AND p_expected_merchant_code IS DISTINCT FROM p_live_merchant_code THEN
     RETURN QUERY SELECT
       'mismatch'::text,
       format('merchant_code live (%s) != expected (%s)',
-        p_live_merchant_code, p_expected_merchant_code)::text,
+        COALESCE(p_live_merchant_code, 'NULL'), p_expected_merchant_code)::text,
       NULL::uuid, v_sol.estado::text, false, false, false, false;
     RETURN;
   END IF;
@@ -196,16 +207,20 @@ BEGIN
 
   -- 4) UPDATE socio_solicitudes: estado + pagada_en + transaction_id/code
   -- + movimiento_id. Idempotente: no retrocede desde pagada/enviada.
-  UPDATE public.socio_solicitudes SET
+  -- Alias "ss" en TODAS las columnas para evitar colision con el output
+  -- param movimiento_id del RETURNS TABLE (PL/pgSQL expone los output
+  -- params como variables y en un UPDATE sin alias Postgres no sabe si
+  -- "movimiento_id" refiere a la variable o a la columna -> 42702).
+  UPDATE public.socio_solicitudes AS ss SET
     estado = CASE
-      WHEN estado IN ('pagada','enviada') THEN estado
+      WHEN ss.estado IN ('pagada','enviada') THEN ss.estado
       ELSE 'pagada'
     END,
-    pagada_en = COALESCE(pagada_en, NOW()),
-    sumup_transaction_id = COALESCE(sumup_transaction_id, p_live_transaction_id),
-    sumup_transaction_code = COALESCE(sumup_transaction_code, p_live_transaction_code),
-    movimiento_id = COALESCE(movimiento_id, v_mov_id)
-  WHERE id = p_solicitud_id;
+    pagada_en = COALESCE(ss.pagada_en, NOW()),
+    sumup_transaction_id = COALESCE(ss.sumup_transaction_id, p_live_transaction_id),
+    sumup_transaction_code = COALESCE(ss.sumup_transaction_code, p_live_transaction_code),
+    movimiento_id = COALESCE(ss.movimiento_id, v_mov_id)
+  WHERE ss.id = p_solicitud_id;
 
   -- 5) APODERADO: socio=true + socio_periodo monotonico + qr_token si falta.
   IF v_sol.apoderado_id IS NOT NULL THEN
