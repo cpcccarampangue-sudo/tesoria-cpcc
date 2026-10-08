@@ -766,10 +766,13 @@ async function intentarRedirigirACheckout(
       urlSumUp = checkout.checkout_url;
     }
   } catch (err) {
-    // Log sin PII, solo codigo de error si existe. El mensaje completo
-    // puede traer datos del checkout o del email.
-    const code = err instanceof Error ? err.name : "unknown";
-    console.error("[incorporacion] SumUp crearCheckout fallo:", code);
+    // Log con nombre + mensaje para diagnosticar fallos de SumUp. El
+    // mensaje viene de lib/sumup/client.ts sumupFetch que ya extrae el
+    // body de SumUp y lo incluye en el Error("SumUp POST ... fallo: ...").
+    // No contiene PII del apoderado — solo detalles tecnicos de la API.
+    const name = err instanceof Error ? err.name : "unknown";
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[incorporacion] SumUp crearCheckout fallo:", name, msg);
   }
   if (urlSumUp) {
     redirect(urlSumUp);
