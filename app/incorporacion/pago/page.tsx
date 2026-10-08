@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { SocioConfig, SocioSolicitud } from "@/lib/types";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { SocioSolicitud } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
-import { linkParaMonto } from "@/lib/socios/precio";
+import { crearCheckout, obtenerCheckout } from "@/lib/sumup/client";
+import { siteUrl } from "@/lib/qr";
 import { AppFooter } from "@/components/app-footer";
 
 export const metadata = {
@@ -16,6 +18,57 @@ function firstParam(raw: string | string[] | undefined): string {
   return raw ?? "";
 }
 
+// Resuelve la URL del hosted checkout SumUp para una solicitud en
+// pendiente_pago. Reutiliza el checkout existente si sigue PENDING;
+// crea uno nuevo si no hay o el anterior ya no sirve. Devuelve null si
+// hubo cualquier error (la UI muestra aviso de contactar a la directiva).
+async function resolverUrlCheckout(
+  solicitud: SocioSolicitud
+): Promise<string | null> {
+  try {
+    // 1) Si ya hay checkout previo, verificar si sigue vivo.
+    if (solicitud.sumup_checkout_id) {
+      try {
+        const live = await obtenerCheckout(solicitud.sumup_checkout_id);
+        if (live.status === "PENDING") {
+          return live.hosted_checkout_url ?? live.checkout_url ?? null;
+        }
+        // EXPIRED / FAILED / CANCELED: creamos uno nuevo abajo.
+      } catch (err) {
+        console.error(
+          "[incorporacion/pago] obtenerCheckout fallo:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+    // 2) Crear nuevo checkout. amount proviene del snapshot
+    //    solicitud.monto_cuota (ya resuelto por precioVigente al crear
+    //    la solicitud). SumUp hosted_checkout:enabled devuelve una URL
+    //    lista para redirigir.
+    const checkout = await crearCheckout({
+      checkoutReference: `socio_${solicitud.id}`,
+      amount: solicitud.monto_cuota,
+      currency: "CLP",
+      description: `Cuota socio CdP ${solicitud.periodo_anio} - ${solicitud.apoderado_nombre}`,
+      returnUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
+      payToEmail: solicitud.apoderado_email,
+      payerName: solicitud.apoderado_nombre,
+    });
+    const admin = createSupabaseAdminClient();
+    await admin
+      .from("socio_solicitudes")
+      .update({ sumup_checkout_id: checkout.id })
+      .eq("id", solicitud.id);
+    return checkout.hosted_checkout_url ?? checkout.checkout_url ?? null;
+  } catch (err) {
+    console.error(
+      "[incorporacion/pago] resolverUrlCheckout fallo:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return null;
+  }
+}
+
 export default async function PagoPage({
   searchParams,
 }: {
@@ -26,27 +79,22 @@ export default async function PagoPage({
   if (!token) notFound();
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: solData }, { data: cfgData }] = await Promise.all([
-    supabase
-      .from("socio_solicitudes")
-      .select("*")
-      .eq("qr_token", token)
-      .maybeSingle(),
-    supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
-  ]);
+  const { data: solData } = await supabase
+    .from("socio_solicitudes")
+    .select("*")
+    .eq("qr_token", token)
+    .maybeSingle();
   const solicitud = solData as SocioSolicitud | null;
-  const config = cfgData as SocioConfig | null;
 
   if (!solicitud) notFound();
 
-  const yaPagada = solicitud.estado === "pagada" || solicitud.estado === "enviada";
-  // Elige el Payment Link SumUp cuyo monto preconfigurado coincide
-  // EXACTAMENTE con el monto de la solicitud (snapshot). Si no hay link
-  // para ese monto, mostramos aviso en vez de un boton que cobre otro
-  // valor. Esto previene cobrar $20.000 cuando la promo decia $18.500.
-  const linkPago = config
-    ? linkParaMonto(config, solicitud.monto_cuota)
-    : null;
+  const yaPagada =
+    solicitud.estado === "pagada" || solicitud.estado === "enviada";
+
+  // Si esta pendiente, generar/recuperar URL del checkout dinamico.
+  // Esta pagina NO marca pagada por si misma: solo refleja el estado
+  // actual de la solicitud en DB y expone el hosted checkout SumUp.
+  const checkoutUrl = yaPagada ? null : await resolverUrlCheckout(solicitud);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -105,10 +153,10 @@ export default async function PagoPage({
             deberías tener el QR en tu bandeja de entrada. Si no lo
             encuentras, contacta a la directiva para solicitar un reenvío.
           </div>
-        ) : linkPago ? (
+        ) : checkoutUrl ? (
           <>
             <a
-              href={linkPago}
+              href={checkoutUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-primary w-full text-center mt-4 py-4 text-lg"
@@ -135,14 +183,24 @@ export default async function PagoPage({
             </div>
           </>
         ) : (
-          <div className="card bg-amber-50 border border-amber-200 mt-4 text-sm text-amber-900">
+          <div className="card bg-amber-50 border border-amber-200 mt-4 text-sm text-amber-900 space-y-2">
             <strong>
-              Link de pago para ${solicitud.monto_cuota.toLocaleString("es-CL")}{" "}
-              CLP no está configurado.
-            </strong>{" "}
-            Para evitar cobrar un monto incorrecto no mostramos un link
-            genérico. Por favor contacta directamente a la tesorería para
-            completar tu incorporación como socio.
+              No pudimos generar el enlace de pago en este momento.
+            </strong>
+            <p>
+              Por favor recarga esta página en unos minutos para reintentar. Si
+              el problema persiste, contacta a la tesorería del Centro de
+              Padres.
+            </p>
+            <form action="" method="get">
+              <input type="hidden" name="token" value={token} />
+              <button
+                type="submit"
+                className="btn-secondary w-full mt-2"
+              >
+                Reintentar
+              </button>
+            </form>
           </div>
         )}
 

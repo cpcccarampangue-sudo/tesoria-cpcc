@@ -101,33 +101,85 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, note: "ya procesada" });
   }
 
-  // Confirmar el estado contra la API (defensa en profundidad: no
-  // confiar solo en el webhook).
-  let estadoReal = event.payload?.status;
-  if (solicitud.sumup_checkout_id) {
-    try {
-      const live = await obtenerCheckout(solicitud.sumup_checkout_id);
-      estadoReal = live.status;
-      if (live.transaction_id) {
-        event.payload = {
-          ...(event.payload ?? {}),
-          transaction_id: live.transaction_id,
-          transaction_code: live.transaction_code,
-        };
-      }
-    } catch {
-      // Si falla el GET, confiamos en lo que vino en el webhook.
-    }
-  }
-
-  if (estadoReal !== "PAID") {
-    // No es un pago exitoso (puede ser PENDING, FAILED, EXPIRED, etc.)
-    // No cambiamos estado — queda en pendiente_pago hasta que llegue el PAID.
+  // Defensa en profundidad: NO confiar en el payload del webhook. Hacemos
+  // GET al checkout real en SumUp y validamos monto, moneda, reference
+  // antes de marcar pagada. Si cualquier verificacion falla, loggeamos y
+  // dejamos la solicitud en pendiente_pago (nunca marcamos pagada con
+  // datos sospechosos).
+  if (!solicitud.sumup_checkout_id) {
+    console.error(
+      "[webhook SumUp] solicitud sin sumup_checkout_id, no se puede revalidar",
+      { solicitud_id: solicitud.id }
+    );
     return NextResponse.json({
       ok: true,
-      note: `estado ${estadoReal}, no se procesa`,
+      note: "sin sumup_checkout_id, no se procesa",
     });
   }
+  let live;
+  try {
+    live = await obtenerCheckout(solicitud.sumup_checkout_id);
+  } catch (err) {
+    console.error(
+      "[webhook SumUp] obtenerCheckout fallo:",
+      err instanceof Error ? err.message : String(err)
+    );
+    return NextResponse.json(
+      { error: "no se pudo revalidar checkout en SumUp" },
+      { status: 502 }
+    );
+  }
+
+  if (live.status !== "PAID") {
+    // Puede ser PENDING, FAILED, EXPIRED, CANCELED. No marcamos pagada.
+    return NextResponse.json({
+      ok: true,
+      note: `estado ${live.status}, no se procesa`,
+    });
+  }
+
+  // Verificaciones de integridad: todo debe calzar con nuestra solicitud.
+  // Si algo no coincide, es un pago sospechoso (otra transaccion, monto
+  // alterado, moneda distinta). No marcamos pagada; loggeamos para que
+  // la directiva lo revise manualmente.
+  const refEsperado = `socio_${solicitud.id}`;
+  if (live.checkout_reference !== refEsperado) {
+    console.error("[webhook SumUp] checkout_reference no coincide", {
+      esperado: refEsperado,
+      recibido: live.checkout_reference,
+      solicitud_id: solicitud.id,
+    });
+    return NextResponse.json(
+      { error: "checkout_reference no coincide" },
+      { status: 409 }
+    );
+  }
+  if (live.currency !== "CLP") {
+    console.error("[webhook SumUp] moneda no esperada", {
+      esperado: "CLP",
+      recibido: live.currency,
+      solicitud_id: solicitud.id,
+    });
+    return NextResponse.json(
+      { error: "moneda no coincide" },
+      { status: 409 }
+    );
+  }
+  if (Number(live.amount) !== Number(solicitud.monto_cuota)) {
+    console.error("[webhook SumUp] monto no coincide", {
+      esperado: solicitud.monto_cuota,
+      recibido: live.amount,
+      solicitud_id: solicitud.id,
+    });
+    return NextResponse.json(
+      { error: "monto no coincide" },
+      { status: 409 }
+    );
+  }
+
+  // Normalizamos los datos de transaccion desde la respuesta live.
+  const transaction_id = live.transaction_id ?? null;
+  const transaction_code = live.transaction_code ?? null;
 
   // Crear movimiento en el libro de caja si la config lo permite.
   // Si cuenta_sumup_id esta configurada, el pago aparece como ingreso
@@ -166,14 +218,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Marcar como pagada
+  // Marcar como pagada. transaction_id/code vienen del GET live (defensa
+  // en profundidad), no del payload del webhook.
   const { error: updErr } = await supabase
     .from("socio_solicitudes")
     .update({
       estado: "pagada",
       pagada_en: new Date().toISOString(),
-      sumup_transaction_id: event.payload?.transaction_id ?? null,
-      sumup_transaction_code: event.payload?.transaction_code ?? null,
+      sumup_transaction_id: transaction_id,
+      sumup_transaction_code: transaction_code,
       movimiento_id: movimientoId,
     })
     .eq("id", solicitud.id);

@@ -18,8 +18,6 @@ import type {
   SocioConfig,
   SocioSolicitud,
 } from "@/lib/types";
-import { crearCheckout, sumupHabilitado } from "@/lib/sumup/client";
-import { siteUrl } from "@/lib/qr";
 import { todosLosCursos } from "@/lib/cursos";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { normalizarEmail } from "@/lib/normalizar";
@@ -351,7 +349,10 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   // Consumimos la sesion OTP: una verificacion de correo = una
   // incorporacion. Si quiere ingresar otra, OTP nuevo.
   await consumirSesion(sesionId);
-  await intentarRedirigirACheckout(solicitud, config, email, apoderado.nombre);
+  // El checkout SumUp se genera on-demand al cargar /incorporacion/pago
+  // (ver resolverUrlCheckout en app/incorporacion/pago/page.tsx). Esto
+  // nos da una sola ruta para el flujo y permite reintentar si el
+  // checkout anterior expiro.
   redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
 }
 
@@ -475,11 +476,10 @@ export async function crearSolicitudManualSocio(
     throw new Error("No se pudo crear la solicitud. Intenta de nuevo.");
   }
 
-  const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
   // Consumimos la sesion OTP: una verificacion = una incorporacion.
   await consumirSesion(sesionId);
-  await intentarRedirigirACheckout(solicitud, config, email, nombre);
-  redirect(`/incorporacion/pago?token=${solicitud.qr_token}`);
+  // El checkout SumUp se genera on-demand al cargar /incorporacion/pago.
+  redirect(`/incorporacion/pago?token=${(nueva as Pick<SocioSolicitud, "qr_token">).qr_token}`);
 }
 
 // ===============================================================
@@ -735,46 +735,7 @@ function enmascararEmailLog(email: string): string {
   return `${local[0]}***@${dom1[0]}***${dom2}`;
 }
 
-// Helper interno: crea checkout SumUp (si esta configurado) y guarda
-// la url para que el llamador haga el redirect fuera del try/catch.
-// Devuelve si se guardo el checkout_id en la solicitud.
-async function intentarRedirigirACheckout(
-  solicitud: Pick<SocioSolicitud, "id" | "qr_token">,
-  config: SocioConfig,
-  email: string,
-  nombreFamilia: string
-): Promise<void> {
-  if (!sumupHabilitado()) return;
-  let urlSumUp: string | null = null;
-  try {
-    const supabase = createSupabaseAdminClient();
-    const checkout = await crearCheckout({
-      checkoutReference: `socio_${solicitud.id}`,
-      // amount decidido server-side en el mismo instante que la solicitud.
-      amount: precioVigente(config),
-      currency: "CLP",
-      description: `Cuota socio CdP ${config.periodo_anio} - ${nombreFamilia}`,
-      returnUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
-      payToEmail: email,
-      payerName: nombreFamilia,
-    });
-    await supabase
-      .from("socio_solicitudes")
-      .update({ sumup_checkout_id: checkout.id })
-      .eq("id", solicitud.id);
-    if (checkout.checkout_url) {
-      urlSumUp = checkout.checkout_url;
-    }
-  } catch (err) {
-    // Log con nombre + mensaje para diagnosticar fallos de SumUp. El
-    // mensaje viene de lib/sumup/client.ts sumupFetch que ya extrae el
-    // body de SumUp y lo incluye en el Error("SumUp POST ... fallo: ...").
-    // No contiene PII del apoderado — solo detalles tecnicos de la API.
-    const name = err instanceof Error ? err.name : "unknown";
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[incorporacion] SumUp crearCheckout fallo:", name, msg);
-  }
-  if (urlSumUp) {
-    redirect(urlSumUp);
-  }
-}
+// NOTA: la creacion del checkout SumUp ahora vive en /incorporacion/pago
+// (ver resolverUrlCheckout en page.tsx). Una sola ruta decide la URL
+// del hosted checkout, lo que permite reintentar si expira y evita
+// que una falla transitoria al crear la solicitud rompa el flujo.
