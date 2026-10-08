@@ -41,7 +41,28 @@ export async function enviarCorreoQrSocio(
 
   const url = urlPublicaSocio(qrTokenPublico);
   const qrDataUrl = await generarQrDataUrl(url, { size: 400 });
-  const { subject, html } = armarCorreoSocioHtml(s, qrDataUrl, qrTokenPublico);
+
+  // Decidir tipo de correo: bienvenida (primera vez) vs renovacion.
+  // Es renovacion si el apoderado tiene al menos otra solicitud
+  // pagada/enviada de un periodo distinto (anterior) a la actual.
+  let tipo: "bienvenida" | "renovacion" = "bienvenida";
+  if (s.apoderado_id) {
+    const { count } = await supabase
+      .from("socio_solicitudes")
+      .select("id", { count: "exact", head: true })
+      .eq("apoderado_id", s.apoderado_id)
+      .in("estado", ["pagada", "enviada"])
+      .neq("id", s.id)
+      .lt("periodo_anio", s.periodo_anio);
+    if ((count ?? 0) > 0) tipo = "renovacion";
+  }
+
+  const { subject, html } = armarCorreoSocioHtml({
+    solicitud: s,
+    qrDataUrl,
+    qrTokenPublico,
+    tipo,
+  });
 
   await enviarCorreo({
     to: s.apoderado_email,
