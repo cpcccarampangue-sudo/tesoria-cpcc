@@ -231,7 +231,7 @@ export function ConfigForm({
                   monto_cuota_promocional: e.target.value,
                 }))
               }
-              min={1}
+              min={100}
               step={100}
               placeholder="18500"
             />
