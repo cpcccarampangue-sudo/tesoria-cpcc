@@ -50,7 +50,11 @@ async function resolverUrlCheckout(
       amount: solicitud.monto_cuota,
       currency: "CLP",
       description: `Cuota socio CdP ${solicitud.periodo_anio} - ${solicitud.apoderado_nombre}`,
-      returnUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
+      // redirectUrl = retorno visual del browser tras hosted checkout
+      // (vuelve a esta misma pantalla, que mostrara el estado actual
+      // post-webhook). El return_url (webhook) lo pone el helper al
+      // dominio canonico de /api/webhooks/sumup.
+      redirectUrl: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
       payToEmail: solicitud.apoderado_email,
       payerName: solicitud.apoderado_nombre,
     });

@@ -15,7 +15,6 @@ import { NextResponse } from "next/server";
 import { requireDirectiva } from "@/lib/auth";
 import { crearCheckout } from "@/lib/sumup/client";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { siteUrl } from "@/lib/qr";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +50,9 @@ export async function POST() {
       amount: MONTO_TEST,
       currency: CURRENCY_TEST,
       description: `E2E SumUp test - ignorar (${checkout_reference})`,
-      returnUrl: `${siteUrl()}/api/debug/sumup-e2e/status?ref=${encodeURIComponent(checkout_reference)}`,
+      // No pasamos redirectUrl: la prueba E2E termina en SumUp hosted
+      // page, sin volver visualmente a nuestra app. return_url (webhook)
+      // lo pone el helper automaticamente.
     });
   } catch (err) {
     // Si falla la creacion, mantenemos la fila pero con estado FAILED

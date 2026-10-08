@@ -34,12 +34,28 @@ export type CrearCheckoutInput = {
   amount: number;
   currency?: string; // default CLP
   description?: string;
-  // URL a la que SumUp redirige al apoderado despues de pagar.
-  returnUrl?: string;
+  // URL de retorno visual del browser DESPUES del hosted checkout.
+  // Opcional. NO es el webhook de notificaciones (ese es return_url y
+  // lo controla el helper, siempre apunta a /api/webhooks/sumup).
+  redirectUrl?: string;
   // Email del pagador (SumUp lo prellena en el formulario).
   payToEmail?: string;
   payerName?: string;
 };
+
+// SumUp usa el campo "return_url" del checkout como destino de las
+// notificaciones server-to-server (POST con cambios de estado). SIEMPRE
+// debe apuntar a nuestro webhook publico. Usamos SUMUP_WEBHOOK_URL si
+// esta seteado para evitar que un preview deploy reciba webhooks de
+// pagos reales; fallback a NEXT_PUBLIC_SITE_URL.
+function webhookNotificationUrl(): string {
+  const explicit = process.env.SUMUP_WEBHOOK_URL;
+  if (explicit) return explicit;
+  const site =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    "https://tesoreria.centropadrescarampangue.cl";
+  return `${site.replace(/\/$/, "")}/api/webhooks/sumup`;
+}
 
 export type CheckoutResp = {
   id: string; // ID interno SumUp
@@ -153,23 +169,28 @@ export async function crearCheckout(
   input: CrearCheckoutInput
 ): Promise<CheckoutResp> {
   const merchantCode = requireEnv("SUMUP_MERCHANT_CODE");
-  const body = {
+  const body: Record<string, unknown> = {
     checkout_reference: input.checkoutReference,
     amount: input.amount,
     currency: input.currency ?? "CLP",
     merchant_code: merchantCode,
     description: input.description,
-    return_url: input.returnUrl,
+    // return_url = destino de notificaciones server-to-server. SIEMPRE
+    // nuestro webhook publico. No es la URL visual del browser.
+    return_url: webhookNotificationUrl(),
     pay_to_email: input.payToEmail,
     personal_details: input.payerName
       ? { first_name: input.payerName }
       : undefined,
-    // Pide a SumUp que exponga una pagina hosted lista para redirigir
-    // (devuelve checkout.hosted_checkout_url / checkout_url). Sin este
-    // flag SumUp solo devuelve el id y hay que implementar el widget
-    // propio con el SDK — no es lo que queremos.
+    // hosted_checkout: SumUp expone pagina lista para redirigir.
     hosted_checkout: { enabled: true },
   };
+  // redirect_url = URL visual a donde el browser aterriza tras pagar.
+  // Opcional; si no se setea, SumUp muestra pantalla de confirmacion
+  // propia sin redirect.
+  if (input.redirectUrl) {
+    body.redirect_url = input.redirectUrl;
+  }
   return await sumupFetch<CheckoutResp>("/checkouts", {
     method: "POST",
     body: JSON.stringify(body),
