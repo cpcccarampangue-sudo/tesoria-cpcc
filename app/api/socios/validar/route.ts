@@ -19,6 +19,7 @@ import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { getValidadorContexto, type ValidadorContexto } from "@/lib/auth";
 import { hmacAudit } from "@/lib/audit/hmac";
+import { resolverQrToken } from "@/lib/socios/qr-familia";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,12 @@ const RL_WIN_MS = 60 * 1000;
 type RespuestaInvalida = {
   valid: false;
   motivo: string;
+  // Cuando el QR es conocido pero la membresia no esta vigente para el
+  // periodo activo, lo distinguimos de "QR inexistente/invalido" para
+  // que la UI pueda mostrar un estado "warning" en lugar de "error".
+  estado?: "membresia_no_vigente" | "qr_invalido";
+  displayName?: string;
+  periodo?: number;
 };
 type RespuestaValida = {
   valid: true;
@@ -81,56 +88,72 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const [{ data: solData }, { data: cfgData }] = await Promise.all([
-    supabase
-      .from("socio_solicitudes")
-      .select(
-        "apoderado_id, apoderado_nombre, estado, periodo_anio"
-      )
-      .eq("qr_token", token)
-      .maybeSingle(),
+  const admin = createSupabaseAdminClient();
+  const [resuelto, { data: cfgData }] = await Promise.all([
+    // Resolver qr_token: primero en apoderados.qr_token (canonico);
+    // fallback a socio_solicitudes.qr_token (compat legacy).
+    resolverQrToken(admin, token),
     supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
   ]);
-
-  const solicitud = solData as Pick<
-    SocioSolicitud,
-    "apoderado_id" | "apoderado_nombre" | "estado" | "periodo_anio"
-  > | null;
   const config = cfgData as SocioConfig | null;
   const periodoVigente = config?.periodo_anio ?? new Date().getFullYear();
-  const apoderadoId = solicitud?.apoderado_id ?? null;
 
-  if (!solicitud) {
+  // CASO C: QR desconocido en ambos lugares -> invalido generico.
+  if (!resuelto) {
     await registrarLog(ctx, metodo, "no_vigente", token, null);
     return invalida();
   }
-  if (solicitud.estado !== "pagada" && solicitud.estado !== "enviada") {
-    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
-    return invalida();
-  }
-  if (solicitud.periodo_anio !== periodoVigente) {
-    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
-    return invalida();
-  }
 
+  const apoderadoId = resuelto.apoderadoId;
+
+  // Buscar la solicitud VIGENTE del apoderado para el periodo actual.
+  const { data: solVigenteData } = await admin
+    .from("socio_solicitudes")
+    .select("apoderado_nombre, estado, periodo_anio")
+    .eq("apoderado_id", apoderadoId)
+    .eq("periodo_anio", periodoVigente)
+    .in("estado", ["pagada", "enviada"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const solVigente = solVigenteData as Pick<
+    SocioSolicitud,
+    "apoderado_nombre" | "estado" | "periodo_anio"
+  > | null;
+
+  // Nombre para mostrar: tomamos el apoderado real para no filtrar
+  // nombre de otras solicitudes.
+  const { data: apData } = await admin
+    .from("apoderados")
+    .select("nombre")
+    .eq("id", apoderadoId)
+    .maybeSingle();
+  const nombreApoderado = (apData as { nombre: string } | null)?.nombre ?? "";
+  const displayName = reducirNombre(nombreApoderado);
+
+  // Ventana temporal del periodo activo.
   const hoy = new Date().toISOString().slice(0, 10);
-  if (config?.periodo_inicio && hoy < config.periodo_inicio) {
+  const antesDeInicio = !!config?.periodo_inicio && hoy < config.periodo_inicio;
+  const despuesDeFin = !!config?.periodo_fin && hoy > config.periodo_fin;
+
+  // CASO B: QR conocido pero sin membresia vigente para el periodo actual.
+  if (!solVigente || antesDeInicio || despuesDeFin) {
     await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
-    return invalida();
-  }
-  if (config?.periodo_fin && hoy > config.periodo_fin) {
-    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
-    return invalida();
+    return NextResponse.json<RespuestaInvalida>({
+      valid: false,
+      estado: "membresia_no_vigente",
+      displayName,
+      periodo: periodoVigente,
+      motivo: `Membresía no vigente para el período ${periodoVigente}. Esta familia está registrada pero aún no ha renovado.`,
+    });
   }
 
-  const displayName = reducirNombre(solicitud.apoderado_nombre);
+  // CASO A: QR conocido + membresia vigente.
   const validUntil = formatearVigencia(
     config?.periodo_fin ?? null,
     periodoVigente
   );
-
   await registrarLog(ctx, metodo, "vigente", token, apoderadoId);
-
   return NextResponse.json<RespuestaValida>({
     valid: true,
     displayName,

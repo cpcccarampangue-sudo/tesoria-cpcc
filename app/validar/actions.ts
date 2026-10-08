@@ -205,7 +205,13 @@ export type ConfirmarResultado =
   | {
       ok: true;
       valid: boolean;
-      // Solo si valid=true, respuesta minima tipo /api/socios/validar.
+      // Si valid=true -> socio vigente (CASO A).
+      // Si valid=false -> membresia no vigente (CASO B): la familia esta
+      //   registrada pero no renovo para el periodo actual.
+      // Datos minimos para ambos casos (displayName no se expone si
+      //   valid=false para no filtrar informacion sensible mas alla de
+      //   lo que ya mostramos).
+      estado?: "vigente" | "membresia_no_vigente";
       displayName?: string;
       status?: "Activo";
       category?: "Apoderado";
@@ -278,6 +284,9 @@ export async function confirmarIdentidadYValidar(
   // mensaje generico. No revelamos si el PIN estuvo mal o la familia no
   // es socia.
   if (!match) {
+    // IMPORTANTE: pin_mismatch NO debe filtrar que la familia existe o no.
+    // Devolvemos valid=false sin estado explicito ni displayName (el UI
+    // mostrara el mensaje generico "credencial no vigente").
     console.log(
       "[validar] confirmar",
       `actor=${actorKey(ctx)} apod=${apoderadoId} pin_mismatch`
@@ -330,7 +339,13 @@ export async function confirmarIdentidadYValidar(
       resultado: "no_vigente",
       apoderadoId,
     });
-    return { ok: true, valid: false };
+    return {
+      ok: true,
+      valid: false,
+      estado: "membresia_no_vigente",
+      displayName: reducirNombre(nombreFamilia),
+      periodo: periodoVigente,
+    };
   }
 
   const hoy = new Date().toISOString().slice(0, 10);
@@ -341,7 +356,13 @@ export async function confirmarIdentidadYValidar(
       resultado: "no_vigente",
       apoderadoId,
     });
-    return { ok: true, valid: false };
+    return {
+      ok: true,
+      valid: false,
+      estado: "membresia_no_vigente",
+      displayName: reducirNombre(nombreFamilia),
+      periodo: periodoVigente,
+    };
   }
   if (config?.periodo_fin && hoy > config.periodo_fin) {
     await registrarValidacion({
@@ -350,7 +371,13 @@ export async function confirmarIdentidadYValidar(
       resultado: "no_vigente",
       apoderadoId,
     });
-    return { ok: true, valid: false };
+    return {
+      ok: true,
+      valid: false,
+      estado: "membresia_no_vigente",
+      displayName: reducirNombre(nombreFamilia),
+      periodo: periodoVigente,
+    };
   }
 
   console.log(
@@ -366,6 +393,7 @@ export async function confirmarIdentidadYValidar(
   return {
     ok: true,
     valid: true,
+    estado: "vigente",
     displayName: reducirNombre(nombreFamilia),
     status: "Activo",
     category: "Apoderado",

@@ -295,6 +295,11 @@ export type CuotaEstadoApoderado = {
 
 // === SOCIOS (incorporacion con QR via SumUp) ===
 
+// Nota del QR permanente: desde la migracion 030, apoderados.qr_token es
+// el QR canonico por familia. Las socio_solicitudes conservan sus
+// qr_token historicos (compatibilidad legacy) pero el canonico vive en
+// apoderados y se reusa en todas las renovaciones.
+
 export type SocioConfig = {
   id: number;
   periodo_anio: number;

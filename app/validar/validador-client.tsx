@@ -19,7 +19,16 @@ type ResultadoValido = {
   validUntil: string;
   periodo: number;
 };
-type ResultadoInvalido = { valid: false; motivo: string };
+type ResultadoInvalido = {
+  valid: false;
+  motivo: string;
+  // Si el QR es conocido pero sin membresia vigente, el server marca
+  // estado='membresia_no_vigente' y envia displayName + periodo. Se
+  // renderiza como warning (amber) en vez de error (red).
+  estado?: "membresia_no_vigente" | "qr_invalido";
+  displayName?: string;
+  periodo?: number;
+};
 type Resultado = ResultadoValido | ResultadoInvalido;
 
 type Modo =
@@ -200,11 +209,24 @@ export function ValidadorClient() {
           periodo: r.periodo!,
         });
       } else {
-        setResultado({
-          valid: false,
-          motivo:
-            "La credencial no se encuentra registrada o no está vigente.",
-        });
+        // Si el server distingue "membresia_no_vigente" (CASO B), lo
+        // propagamos a la UI para render ambar. En caso contrario
+        // (pin_mismatch u otro) mostramos mensaje generico (rojo).
+        if (r.estado === "membresia_no_vigente") {
+          setResultado({
+            valid: false,
+            estado: "membresia_no_vigente",
+            displayName: r.displayName,
+            periodo: r.periodo,
+            motivo: `Membresía no vigente${r.periodo ? ` para el período ${r.periodo}` : ""}.`,
+          });
+        } else {
+          setResultado({
+            valid: false,
+            motivo:
+              "La credencial no se encuentra registrada o no está vigente.",
+          });
+        }
       }
       setModo("inicial");
       setPin("");
@@ -666,40 +688,81 @@ export function ValidadorClient() {
         </div>
       )}
 
-      {/* Credencial no válida — mensaje genérico */}
-      {resultado?.valid === false && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 overflow-hidden">
-          <div className="px-5 py-5 flex items-start gap-3">
-            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-              <svg
-                className="w-7 h-7 text-red-700"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.4}
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-red-800">
-                Credencial no válida
+      {/* CASO B: membresía no vigente — advertencia (ambar) */}
+      {resultado?.valid === false &&
+        resultado.estado === "membresia_no_vigente" && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 overflow-hidden">
+            <div className="px-5 py-5 flex items-start gap-3">
+              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <svg
+                  className="w-7 h-7 text-amber-700"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.4}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v2m0 4h.01M4.93 19h14.14a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.19 16a2 2 0 001.74 3z"
+                  />
+                </svg>
               </div>
-              <div className="text-lg font-semibold text-slate-900 leading-tight mt-0.5">
-                Credencial inválida
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-800">
+                  Membresía no vigente
+                </div>
+                {resultado.displayName && (
+                  <div className="text-lg font-semibold text-slate-900 leading-tight mt-0.5 truncate">
+                    {resultado.displayName}
+                  </div>
+                )}
+                <p className="text-sm text-slate-700 mt-2">
+                  Esta familia está registrada, pero aún no ha renovado su
+                  membresía
+                  {resultado.periodo ? ` para el período ${resultado.periodo}` : ""}.
+                </p>
               </div>
-              <p className="text-sm text-slate-700 mt-2">
-                {resultado.motivo}
-              </p>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+      {/* CASO C: QR inválido / credencial no reconocida — error (rojo) */}
+      {resultado?.valid === false &&
+        resultado.estado !== "membresia_no_vigente" && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 overflow-hidden">
+            <div className="px-5 py-5 flex items-start gap-3">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <svg
+                  className="w-7 h-7 text-red-700"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.4}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-red-800">
+                  Credencial no válida
+                </div>
+                <div className="text-lg font-semibold text-slate-900 leading-tight mt-0.5">
+                  QR inválido
+                </div>
+                <p className="text-sm text-slate-700 mt-2">
+                  {resultado.motivo}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
       {resultado && (
         <button
