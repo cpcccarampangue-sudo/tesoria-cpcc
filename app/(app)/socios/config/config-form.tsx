@@ -208,7 +208,7 @@ export function ConfigForm({
             onChange={(e) =>
               setForm((f) => ({ ...f, monto_cuota_normal: e.target.value }))
             }
-            min={1}
+            min={100}
             step={100}
             required
             placeholder="20000"

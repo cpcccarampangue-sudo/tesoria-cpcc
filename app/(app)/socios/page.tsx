@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { precioVigente } from "@/lib/socios/precio";
 import {
   SOCIO_ESTADO_LABEL,
   type SocioConfig,
@@ -131,7 +132,7 @@ export default async function SociosPage({
                 )}{" "}
                 · Monto cuota:{" "}
                 <strong>
-                  ${config.monto_cuota.toLocaleString("es-CL")} CLP
+                  ${precioVigente(config).toLocaleString("es-CL")} CLP
                 </strong>{" "}
                 · Link SumUp:{" "}
                 {config.sumup_link ? (
