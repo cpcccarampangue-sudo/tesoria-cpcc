@@ -312,7 +312,15 @@ export type SocioConfig = {
   monto_cuota_promocional: number | null;
   promocion_inicio: string | null; // ISO timestamptz
   promocion_fin: string | null; // ISO timestamptz
+  /**
+   * @deprecated 2026-10-08: usar sumup_link_promo / sumup_link_normal.
+   * Columna conservada en DB para rollback. El codigo nuevo no la lee.
+   */
   sumup_link: string | null;
+  // Payment Links SumUp con monto fijo correspondiente a cada precio.
+  // linkParaMonto() elige entre ellos segun el monto de la solicitud.
+  sumup_link_promo: string | null;
+  sumup_link_normal: string | null;
   sumup_checkout_fijo: boolean;
   cuenta_sumup_id: string | null;
   categoria_cuota_id: string | null;

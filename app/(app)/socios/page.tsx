@@ -134,20 +134,31 @@ export default async function SociosPage({
                 <strong>
                   ${precioVigente(config).toLocaleString("es-CL")} CLP
                 </strong>{" "}
-                · Link SumUp:{" "}
-                {config.sumup_link ? (
+                · Links SumUp: promo{" "}
+                {config.sumup_link_promo ? (
                   <a
-                    href={config.sumup_link}
+                    href={config.sumup_link_promo}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand-700 underline"
                   >
-                    configurado
+                    ✓
                   </a>
                 ) : (
-                  <span className="text-amber-700 font-medium">
-                    no configurado
-                  </span>
+                  <span className="text-amber-700 font-medium">—</span>
+                )}
+                {" "}· normal{" "}
+                {config.sumup_link_normal ? (
+                  <a
+                    href={config.sumup_link_normal}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-brand-700 underline"
+                  >
+                    ✓
+                  </a>
+                ) : (
+                  <span className="text-amber-700 font-medium">—</span>
                 )}
               </p>
             </div>

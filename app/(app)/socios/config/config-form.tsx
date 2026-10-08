@@ -29,7 +29,8 @@ export function ConfigForm({
     monto_cuota_promocional: String(config.monto_cuota_promocional ?? ""),
     promocion_inicio: utcToChileLocal(config.promocion_inicio),
     promocion_fin: utcToChileLocal(config.promocion_fin),
-    sumup_link: config.sumup_link ?? "",
+    sumup_link_promo: config.sumup_link_promo ?? "",
+    sumup_link_normal: config.sumup_link_normal ?? "",
     cuenta_sumup_id: config.cuenta_sumup_id ?? "",
     categoria_cuota_id: config.categoria_cuota_id ?? "",
     mensaje_bienvenida: config.mensaje_bienvenida ?? "",
@@ -125,7 +126,8 @@ export function ConfigForm({
           monto_cuota_promocional: hayAlgoPromo ? montoPromo : null,
           promocion_inicio: hayAlgoPromo ? form.promocion_inicio : null,
           promocion_fin: hayAlgoPromo ? form.promocion_fin : null,
-          sumup_link: form.sumup_link.trim() || null,
+          sumup_link_promo: form.sumup_link_promo.trim() || null,
+          sumup_link_normal: form.sumup_link_normal.trim() || null,
           cuenta_sumup_id: form.cuenta_sumup_id || null,
           categoria_cuota_id: form.categoria_cuota_id || null,
           mensaje_bienvenida: form.mensaje_bienvenida.trim() || null,
@@ -282,20 +284,57 @@ export function ConfigForm({
         </div>
       )}
 
-      <div>
-        <label className="label">Link de pago SumUp (fallback)</label>
-        <input
-          type="url"
-          className="input"
-          value={form.sumup_link}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, sumup_link: e.target.value }))
-          }
-          placeholder="https://pay.sumup.com/b2c/XXXXXX"
-        />
-        <p className="text-xs text-slate-500 mt-1">
-          Solo necesario si la API de SumUp no está configurada. Si usas la
-          API, el checkout se crea dinámicamente por solicitud.
+      <div className="border-t border-slate-200 pt-3 space-y-3">
+        <div>
+          <h3 className="font-medium text-slate-800">
+            Links de pago SumUp
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Debes crear <strong>dos Payment Links</strong> en tu cuenta
+            SumUp (desde el panel de SumUp): uno con el precio promocional
+            y otro con el precio normal. Pega aquí el link de cada uno. El
+            sistema elige automáticamente el que corresponda al precio
+            vigente al crear la solicitud.
+          </p>
+        </div>
+        <div>
+          <label className="label">
+            Link SumUp para precio promocional{" "}
+            <span className="text-xs text-slate-500 font-normal">
+              (${form.monto_cuota_promocional || "—"} CLP)
+            </span>
+          </label>
+          <input
+            type="url"
+            className="input"
+            value={form.sumup_link_promo}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, sumup_link_promo: e.target.value }))
+            }
+            placeholder="https://pay.sumup.com/b2c/XXXXXX"
+          />
+        </div>
+        <div>
+          <label className="label">
+            Link SumUp para precio normal{" "}
+            <span className="text-xs text-slate-500 font-normal">
+              (${form.monto_cuota_normal || "—"} CLP)
+            </span>
+          </label>
+          <input
+            type="url"
+            className="input"
+            value={form.sumup_link_normal}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, sumup_link_normal: e.target.value }))
+            }
+            placeholder="https://pay.sumup.com/b2c/XXXXXX"
+          />
+        </div>
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2">
+          Verifica que el monto configurado en cada Payment Link SumUp
+          coincida exactamente con los precios de arriba. Si no coinciden,
+          la familia pagará un monto distinto al que indica el sistema.
         </p>
       </div>
 

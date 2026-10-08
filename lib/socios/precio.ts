@@ -59,6 +59,28 @@ export type InfoPrecio = {
   promocionFin: string | null;
 };
 
+// Devuelve el Payment Link SumUp que corresponde EXACTAMENTE al monto
+// solicitado. Si el monto no coincide con ninguno de los precios
+// configurados o el link correspondiente no esta configurado, devuelve
+// null — en ese caso la UI debe mostrar aviso en vez de un boton que
+// cobre el monto equivocado.
+//
+// La cuenta SumUp del CdP solo soporta Payment Links fijos (no API
+// Online Payments dinamica), por eso necesitamos dos links separados.
+export function linkParaMonto(
+  cfg: SocioConfig,
+  monto: number
+): string | null {
+  if (!Number.isFinite(monto) || monto <= 0) return null;
+  if (cfg.monto_cuota_promocional === monto && cfg.sumup_link_promo) {
+    return cfg.sumup_link_promo;
+  }
+  if (cfg.monto_cuota_normal === monto && cfg.sumup_link_normal) {
+    return cfg.sumup_link_normal;
+  }
+  return null;
+}
+
 // Vista enriquecida para UI (muestra "promo vigente hasta X" / "a partir de Y").
 export function infoPrecio(
   cfg: SocioConfig,

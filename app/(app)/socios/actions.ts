@@ -6,6 +6,30 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { precioVigente } from "@/lib/socios/precio";
 import { chileLocalToUtc } from "@/lib/tz-chile";
+
+// Valida y normaliza un Payment Link de SumUp. Debe ser https y dominio
+// pay.sumup.com. Vacio -> null. Lanza si invalido.
+function validarSumupLink(input: string | null | undefined): string | null {
+  if (input === null || input === undefined) return null;
+  const v = String(input).trim();
+  if (v === "") return null;
+  if (v.length > 2000) throw new Error("El link SumUp es demasiado largo.");
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new Error("El link SumUp debe ser una URL valida.");
+  }
+  if (u.protocol !== "https:") {
+    throw new Error("El link SumUp debe comenzar con https://.");
+  }
+  if (!/\.sumup\.com$/i.test(u.hostname) && u.hostname !== "sumup.com") {
+    throw new Error(
+      "El link SumUp debe apuntar a pay.sumup.com (dominio sumup.com)."
+    );
+  }
+  return v;
+}
 import type { Apoderado, Contacto, Estudiante, SocioConfig } from "@/lib/types";
 import type {
   FamiliaCandidataAdmin,
@@ -152,7 +176,8 @@ export type ActualizarConfigInput = {
   monto_cuota_promocional: number | null;
   promocion_inicio: string | null; // "YYYY-MM-DDTHH:mm[:ss]" en hora de Chile
   promocion_fin: string | null;
-  sumup_link: string | null;
+  sumup_link_promo: string | null;
+  sumup_link_normal: string | null;
   cuenta_sumup_id: string | null;
   categoria_cuota_id: string | null;
   mensaje_bienvenida: string | null;
@@ -223,7 +248,8 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
         promoLlenos === 3 ? input.monto_cuota_promocional : null,
       promocion_inicio: promoInicioUtc,
       promocion_fin: promoFinUtc,
-      sumup_link: input.sumup_link,
+      sumup_link_promo: validarSumupLink(input.sumup_link_promo),
+      sumup_link_normal: validarSumupLink(input.sumup_link_normal),
       cuenta_sumup_id: input.cuenta_sumup_id,
       categoria_cuota_id: input.categoria_cuota_id,
       mensaje_bienvenida: input.mensaje_bienvenida,

@@ -3,6 +3,7 @@ import Image from "next/image";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
+import { linkParaMonto } from "@/lib/socios/precio";
 import { AppFooter } from "@/components/app-footer";
 
 export const metadata = {
@@ -39,6 +40,13 @@ export default async function PagoPage({
   if (!solicitud) notFound();
 
   const yaPagada = solicitud.estado === "pagada" || solicitud.estado === "enviada";
+  // Elige el Payment Link SumUp cuyo monto preconfigurado coincide
+  // EXACTAMENTE con el monto de la solicitud (snapshot). Si no hay link
+  // para ese monto, mostramos aviso en vez de un boton que cobre otro
+  // valor. Esto previene cobrar $20.000 cuando la promo decia $18.500.
+  const linkPago = config
+    ? linkParaMonto(config, solicitud.monto_cuota)
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -97,10 +105,10 @@ export default async function PagoPage({
             deberías tener el QR en tu bandeja de entrada. Si no lo
             encuentras, contacta a la directiva para solicitar un reenvío.
           </div>
-        ) : config?.sumup_link ? (
+        ) : linkPago ? (
           <>
             <a
-              href={config.sumup_link}
+              href={linkPago}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-primary w-full text-center mt-4 py-4 text-lg"
@@ -128,10 +136,13 @@ export default async function PagoPage({
           </>
         ) : (
           <div className="card bg-amber-50 border border-amber-200 mt-4 text-sm text-amber-900">
-            <strong>Link de pago no configurado.</strong> La directiva aún no
-            ha configurado el link de pago SumUp. Por favor contacta
-            directamente a la tesorería para completar tu incorporación como
-            socio.
+            <strong>
+              Link de pago para ${solicitud.monto_cuota.toLocaleString("es-CL")}{" "}
+              CLP no está configurado.
+            </strong>{" "}
+            Para evitar cobrar un monto incorrecto no mostramos un link
+            genérico. Por favor contacta directamente a la tesorería para
+            completar tu incorporación como socio.
           </div>
         )}
 

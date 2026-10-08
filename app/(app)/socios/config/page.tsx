@@ -41,6 +41,8 @@ export default async function SocioConfigPage() {
     promocion_inicio: null,
     promocion_fin: null,
     sumup_link: null,
+    sumup_link_promo: null,
+    sumup_link_normal: null,
     sumup_checkout_fijo: false,
     cuenta_sumup_id: null,
     categoria_cuota_id: null,
