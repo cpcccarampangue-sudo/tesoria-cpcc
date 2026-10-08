@@ -15,16 +15,14 @@
 // (ningun atacante puede forzar un PAID falso sin pagar en SumUp real).
 
 import { NextResponse, type NextRequest } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   verificarFirmaWebhook,
   obtenerCheckout,
   type CheckoutResp,
 } from "@/lib/sumup/client";
-import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { handleE2ETest } from "@/lib/sumup/e2e-handler";
-import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { reconciliarPagoSocio } from "@/lib/socios/reconciliar-pago";
 import type { SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -177,37 +175,31 @@ export async function POST(req: NextRequest) {
 
 // ================================================================
 // Procesamiento del flujo de socios (refLive = "socio_<id>")
+// Delega en reconciliarPagoSocio (RPC transaccional + email idempotente).
 // ================================================================
 async function procesarSocio(
   refLive: string,
   live: CheckoutResp
 ): Promise<NextResponse> {
-  const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
 
-  // Buscar solicitud por el UUID embebido en la reference. La reference
-  // puede ser "socio_<uuid>" o "socio_<uuid>_r<timestamp>" (retry al
-  // recrear un checkout tras FAILED/EXPIRED/CANCELED). Fallback adicional
-  // por sumup_checkout_id si no se puede parsear.
+  // Extraer UUID de reference. Toleramos socio_<uuid> y socio_<uuid>_r<ts>.
+  // Fallback por sumup_checkout_id si parse falla.
   const matchUuid = refLive.match(
     /^socio_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
   );
-  const solicitudId = matchUuid ? matchUuid[1] : refLive.replace(/^socio_/, "");
-  const { data: byId } = await supabase
-    .from("socio_solicitudes")
-    .select("*")
-    .eq("id", solicitudId)
-    .maybeSingle();
-  let solicitud = (byId as SocioSolicitud | null) ?? null;
-  if (!solicitud) {
-    const { data: byCheckout } = await supabase
+  let solicitudId: string | null = matchUuid ? matchUuid[1] : null;
+  if (!solicitudId) {
+    const { data: byCheckout } = await admin
       .from("socio_solicitudes")
-      .select("*")
+      .select("id")
       .eq("sumup_checkout_id", live.id)
       .maybeSingle();
-    solicitud = (byCheckout as SocioSolicitud | null) ?? null;
+    const row = byCheckout as { id: string } | null;
+    solicitudId = row?.id ?? null;
   }
 
-  if (!solicitud) {
+  if (!solicitudId) {
     console.warn(
       "[webhook SumUp] socio_solicitud no encontrada para ref:",
       refLive
@@ -215,123 +207,54 @@ async function procesarSocio(
     return NextResponse.json({ ok: true, note: "sin solicitud asociada" });
   }
 
-  // Idempotencia.
-  if (solicitud.estado === "pagada" || solicitud.estado === "enviada") {
-    return NextResponse.json({ ok: true, note: "ya procesada" });
-  }
-
-  // Validaciones de integridad contra el live.
-  if (live.status !== "PAID") {
-    return NextResponse.json({
-      ok: true,
-      note: `estado ${live.status}, no se procesa`,
-    });
-  }
-  if (live.currency !== "CLP") {
-    console.error("[webhook SumUp] moneda no esperada", {
-      esperado: "CLP",
-      recibido: live.currency,
-      solicitud_id: solicitud.id,
-    });
-    return NextResponse.json({ error: "moneda no coincide" }, { status: 409 });
-  }
-  if (Number(live.amount) !== Number(solicitud.monto_cuota)) {
-    console.error("[webhook SumUp] monto no coincide", {
-      esperado: solicitud.monto_cuota,
-      recibido: live.amount,
-      solicitud_id: solicitud.id,
-    });
-    return NextResponse.json({ error: "monto no coincide" }, { status: 409 });
-  }
-
-  const transaction_id = live.transaction_id ?? null;
-  const transaction_code = live.transaction_code ?? null;
-
-  // Crear movimiento en el libro de caja si la config lo permite.
-  let movimientoId: string | null = null;
-  const { data: cfgData } = await supabase
-    .from("socio_config")
-    .select("cuenta_sumup_id, categoria_cuota_id")
-    .eq("id", 1)
-    .maybeSingle();
-  const cfg = cfgData as {
-    cuenta_sumup_id: string | null;
-    categoria_cuota_id: string | null;
-  } | null;
-  if (cfg?.cuenta_sumup_id) {
-    const descripcion = `Cuota socio CdP ${solicitud.periodo_anio} — ${solicitud.apoderado_nombre} (SumUp)`;
-    const { data: movData, error: movErr } = await supabase
-      .from("movimientos")
-      .insert({
-        fecha: new Date().toISOString().slice(0, 10),
-        tipo: "ingreso",
-        monto: solicitud.monto_cuota,
-        descripcion,
-        categoria_id: cfg.categoria_cuota_id,
-        cuenta_id: cfg.cuenta_sumup_id,
-      })
-      .select("id")
-      .single();
-    if (movErr) {
-      console.error(
-        "[webhook SumUp] Error creando movimiento:",
-        movErr.message
-      );
-    } else {
-      movimientoId = movData.id as string;
-    }
-  }
-
-  // Marcar como pagada (idempotente por el if de arriba).
-  const { error: updErr } = await supabase
-    .from("socio_solicitudes")
-    .update({
-      estado: "pagada",
-      pagada_en: new Date().toISOString(),
-      sumup_transaction_id: transaction_id,
-      sumup_transaction_code: transaction_code,
-      movimiento_id: movimientoId,
-    })
-    .eq("id", solicitud.id);
-  if (updErr) {
-    return NextResponse.json(
-      { error: `actualizando solicitud: ${updErr.message}` },
-      { status: 500 }
-    );
-  }
-
-  // QR permanente por familia: asegurar apoderados.qr_token antes de
-  // enviar el correo. Si no tenia QR, se genera y persiste; si ya
-  // tenia, se reutiliza. En solicitudes sin apoderado_id (edge, flujo
-  // manual que no fue vinculado) no se asigna QR aun — se asignara
-  // cuando la directiva vincule la solicitud a una familia.
-  if (solicitud.apoderado_id) {
-    try {
-      const admin = createSupabaseAdminClient();
-      await obtenerOGenerarQrFamilia(admin, solicitud.apoderado_id);
-    } catch (err) {
-      console.error(
-        "[webhook SumUp] no se pudo asignar qr_token al apoderado:",
-        err instanceof Error ? err.message : String(err)
-      );
-      // No fallamos: la solicitud ya quedo pagada; el correo intentara
-      // enviarse y si no hay qr_token del apoderado, enviar-qr tiene
-      // fallback.
-    }
-  }
-
-  // Disparar envio automatico del QR por correo. Best-effort.
-  try {
-    await enviarCorreoQrSocio(solicitud.id);
-  } catch (err) {
-    console.error("Error enviando correo QR tras webhook SumUp:", err);
-  }
+  const result = await reconciliarPagoSocio(admin, {
+    modo: "por_live",
+    solicitudId,
+    live,
+  });
 
   console.info(
-    "[webhook SumUp] out: PAID procesado",
-    JSON.stringify({ solicitud_id: solicitud.id, movimiento_id: movimientoId })
+    "[webhook SumUp] reconciliacion resultado:",
+    JSON.stringify({
+      resultado: result.resultado,
+      solicitud_id_mask: solicitudId.slice(0, 8) + "…",
+      ...(result.resultado === "reconciliada" || result.resultado === "ya_reconciliada"
+        ? {
+            movimiento_creado: result.core.movimiento_creado,
+            qr_generado: result.core.qr_generado,
+            correo: result.correo,
+          }
+        : {}),
+    })
   );
-  return NextResponse.json({ ok: true, movimiento_id: movimientoId });
+
+  switch (result.resultado) {
+    case "reconciliada":
+    case "ya_reconciliada":
+      return NextResponse.json({
+        ok: true,
+        resultado: result.resultado,
+        correo: result.correo,
+      });
+    case "mismatch":
+      return NextResponse.json(
+        { error: "mismatch", detalle: result.core.detalle },
+        { status: 409 }
+      );
+    case "no_paid":
+      return NextResponse.json({
+        ok: true,
+        note: `estado ${result.live_status}, no se procesa`,
+      });
+    case "sumup_no_disponible":
+      // 502 para que SumUp reintente el webhook despues.
+      return NextResponse.json(
+        { error: "no se pudo revalidar checkout en SumUp" },
+        { status: 502 }
+      );
+    case "solicitud_no_encontrada":
+      return NextResponse.json({ ok: true, note: "solicitud desaparecida" });
+  }
 }
 
 // SumUp a veces hace un GET al endpoint para verificar que existe antes
