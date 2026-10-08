@@ -64,6 +64,10 @@ export async function GET(req: NextRequest) {
         status: l.status,
         transaction_id: l.transaction_id,
         transaction_code: l.transaction_code,
+        // Campos adicionales expuestos por SumUp (si vienen) utiles
+        // para diagnosticar config del checkout.
+        return_url: (l as unknown as { return_url?: string }).return_url ?? null,
+        hosted_checkout_url: l.hosted_checkout_url ?? l.checkout_url ?? null,
       };
     } catch (err) {
       live_error = err instanceof Error ? err.message : String(err);

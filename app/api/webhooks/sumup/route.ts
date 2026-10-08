@@ -11,9 +11,9 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { verificarFirmaWebhook, obtenerCheckout } from "@/lib/sumup/client";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
+import { handleE2ETest } from "@/lib/sumup/e2e-handler";
 import type { SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -52,18 +52,57 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "body invalido" }, { status: 400 });
   }
 
-  // Extraer el checkout_reference del payload (lo que nosotros definimos
-  // al crear el checkout: "socio_<id>")
-  const ref =
-    event.payload?.checkout_reference ??
+  // SumUp envia payloads con formas variadas segun el tipo de evento:
+  //   - A veces trae payload.checkout_reference directamente.
+  //   - A veces trae payload.checkout_id (UUID).
+  //   - A veces solo trae event.id = UUID del checkout (sin payload).
+  // En cualquier caso, el UNICO identificador confiable para resolver
+  // nuestros datos es llamar a GET /v0.1/checkouts/{id} y leer el
+  // checkout_reference real.
+  //
+  // Estrategia:
+  //   1) Intentar sacar checkout_reference directo del payload si viene.
+  //   2) Si no, sacar un UUID candidato (payload.checkout_id o event.id)
+  //      y resolver via API para obtener checkout_reference real.
+  //   3) Con el checkout_reference en mano, decidir el branch.
+
+  const refDirecta = event.payload?.checkout_reference ?? null;
+  const idCandidato =
     event.payload?.checkout_id ??
-    event.id;
-  if (!ref) {
+    (typeof event.id === "string" ? event.id : null);
+
+  let refResuelta: string | null = refDirecta;
+  let liveCheckout: Awaited<ReturnType<typeof obtenerCheckout>> | null = null;
+
+  if (!refResuelta && idCandidato) {
+    try {
+      liveCheckout = await obtenerCheckout(idCandidato);
+      refResuelta = liveCheckout.checkout_reference ?? null;
+    } catch (err) {
+      console.error(
+        "[webhook SumUp] no se pudo resolver checkout desde id:",
+        idCandidato,
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
+  if (!refResuelta) {
+    console.warn(
+      "[webhook SumUp] evento sin referencia resoluble:",
+      JSON.stringify({
+        event_type: event.event_type,
+        id: event.id,
+        payload_keys: event.payload ? Object.keys(event.payload) : null,
+      })
+    );
     return NextResponse.json(
-      { ok: true, note: "evento sin referencia, ignorado" },
+      { ok: true, note: "evento sin referencia resoluble, ignorado" },
       { status: 200 }
     );
   }
+
+  const ref = refResuelta;
 
   // ================================================================
   // BRANCH TEMPORAL E2E (ver 028_e2e_sumup_tests.sql y
@@ -76,16 +115,17 @@ export async function POST(req: NextRequest) {
   // PAID verificado). Nunca cae al codigo de abajo que busca en
   // socio_solicitudes. Eliminar junto con la migracion 029.
   // ================================================================
-  if (typeof ref === "string" && ref.startsWith("sumup_e2e_test_")) {
-    return handleE2ETest(ref, event);
+  if (ref.startsWith("sumup_e2e_test_")) {
+    return handleE2ETest(ref, event, liveCheckout);
   }
 
   const supabase = await createSupabaseServerClient();
 
-  // Buscar nuestra solicitud por el checkout_id o por el patron
-  // "socio_<id>" que inyectamos como checkout_reference.
+  // Buscar nuestra solicitud por el patron "socio_<id>" en la ref ya
+  // resuelta (viene del payload o del GET live) y, como fallback, por
+  // el sumup_checkout_id que podamos haber guardado antes.
   let solicitud: SocioSolicitud | null = null;
-  if (typeof ref === "string" && ref.startsWith("socio_")) {
+  if (ref.startsWith("socio_")) {
     const id = ref.replace(/^socio_/, "");
     const { data } = await supabase
       .from("socio_solicitudes")
@@ -94,11 +134,15 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     solicitud = (data as SocioSolicitud | null) ?? null;
   }
-  if (!solicitud && event.payload?.checkout_id) {
+  const checkoutIdFallback =
+    event.payload?.checkout_id ??
+    (liveCheckout ? liveCheckout.id : null) ??
+    (typeof event.id === "string" ? event.id : null);
+  if (!solicitud && checkoutIdFallback) {
     const { data } = await supabase
       .from("socio_solicitudes")
       .select("*")
-      .eq("sumup_checkout_id", event.payload.checkout_id)
+      .eq("sumup_checkout_id", checkoutIdFallback)
       .maybeSingle();
     solicitud = (data as SocioSolicitud | null) ?? null;
   }
@@ -133,17 +177,21 @@ export async function POST(req: NextRequest) {
     });
   }
   let live;
-  try {
-    live = await obtenerCheckout(solicitud.sumup_checkout_id);
-  } catch (err) {
-    console.error(
-      "[webhook SumUp] obtenerCheckout fallo:",
-      err instanceof Error ? err.message : String(err)
-    );
-    return NextResponse.json(
-      { error: "no se pudo revalidar checkout en SumUp" },
-      { status: 502 }
-    );
+  if (liveCheckout && liveCheckout.id === solicitud.sumup_checkout_id) {
+    live = liveCheckout;
+  } else {
+    try {
+      live = await obtenerCheckout(solicitud.sumup_checkout_id);
+    } catch (err) {
+      console.error(
+        "[webhook SumUp] obtenerCheckout fallo:",
+        err instanceof Error ? err.message : String(err)
+      );
+      return NextResponse.json(
+        { error: "no se pudo revalidar checkout en SumUp" },
+        { status: 502 }
+      );
+    }
   }
 
   if (live.status !== "PAID") {
@@ -271,171 +319,3 @@ export async function GET() {
   return NextResponse.json({ ok: true, service: "sumup webhook" });
 }
 
-// ================================================================
-// BRANCH TEMPORAL E2E — eliminar junto con migracion 029
-// ================================================================
-async function handleE2ETest(
-  ref: string,
-  event: WebhookPayload
-): Promise<NextResponse> {
-  const admin = createSupabaseAdminClient();
-
-  // Buscar la fila de test. Si no existe, se registra el evento como
-  // huerfano para que el operador pueda ver que llego pero no habia row.
-  const { data: rowData } = await admin
-    .from("e2e_sumup_tests")
-    .select(
-      "id, checkout_reference, checkout_id, monto, currency, status, paid_at"
-    )
-    .eq("checkout_reference", ref)
-    .maybeSingle();
-  const row = rowData as
-    | {
-        id: string;
-        checkout_reference: string;
-        checkout_id: string | null;
-        monto: number;
-        currency: string;
-        status: string;
-        paid_at: string | null;
-      }
-    | null;
-
-  // Payload sanitizado para diagnostico — SOLO lo necesario, nada de PII.
-  const sanitized = {
-    event_type: event.event_type ?? null,
-    checkout_id: event.payload?.checkout_id ?? event.id ?? null,
-    checkout_reference: event.payload?.checkout_reference ?? null,
-    status: event.payload?.status ?? null,
-    // amount / currency del payload no son fuente de verdad (los
-    // sacamos del GET live mas abajo).
-  };
-
-  // Si no tenemos el row es un evento HUERFANO (ejecucion abortada en
-  // el create, otro entorno, otro merchant). Terminamos controlado:
-  //   - loguea warning con payload sanitizado para debug;
-  //   - responde HTTP 200 con nota explicita;
-  //   - NO continua a obtenerCheckout, NO toca ninguna tabla, NO
-  //     ejecuta logica de incorporacion. El early-return del handler
-  //     principal garantiza que tampoco hay fall-through hacia
-  //     socio_solicitudes para refs con prefijo sumup_e2e_test_.
-  if (!row) {
-    console.warn(
-      "[webhook SumUp E2E] referencia huerfana (sin fila en DB), fin controlado:",
-      JSON.stringify(sanitized)
-    );
-    return NextResponse.json({
-      ok: true,
-      note: "e2e: referencia huerfana, fin controlado sin side-effects",
-      sanitized,
-    });
-  }
-
-  // Idempotencia: si ya quedo PAID, no reprocesamos.
-  if (row.status === "PAID" && row.paid_at) {
-    return NextResponse.json({ ok: true, note: "e2e: ya paid, idempotente" });
-  }
-
-  // Confirmar estado real con la API — no confiamos en el payload.
-  const checkoutIdLookup =
-    row.checkout_id ?? event.payload?.checkout_id ?? null;
-  if (!checkoutIdLookup) {
-    console.error(
-      "[webhook SumUp E2E] no hay checkout_id para revalidar:",
-      ref
-    );
-    return NextResponse.json(
-      { ok: false, error: "e2e: sin checkout_id" },
-      { status: 400 }
-    );
-  }
-
-  let live;
-  try {
-    live = await obtenerCheckout(checkoutIdLookup);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[webhook SumUp E2E] obtenerCheckout fallo:", msg);
-    await admin
-      .from("e2e_sumup_tests")
-      .update({
-        last_webhook_at: new Date().toISOString(),
-        last_webhook_payload: sanitized,
-        verification_errors: { obtener_checkout: msg },
-      })
-      .eq("id", row.id);
-    return NextResponse.json(
-      { ok: false, error: "e2e: obtenerCheckout fallo", detail: msg },
-      { status: 502 }
-    );
-  }
-
-  // Verificaciones completas. Cualquiera que falle impide marcar PAID.
-  const errors: string[] = [];
-  if (live.checkout_reference !== row.checkout_reference) {
-    errors.push(
-      `checkout_reference: expected ${row.checkout_reference}, got ${live.checkout_reference}`
-    );
-  }
-  if (live.id !== checkoutIdLookup) {
-    errors.push(
-      `checkout_id: expected ${checkoutIdLookup}, got ${live.id}`
-    );
-  }
-  if (Number(live.amount) !== Number(row.monto)) {
-    errors.push(`amount: expected ${row.monto}, got ${live.amount}`);
-  }
-  if (live.currency !== row.currency) {
-    errors.push(`currency: expected ${row.currency}, got ${live.currency}`);
-  }
-  const expectedMerchant = process.env.SUMUP_MERCHANT_CODE;
-  if (expectedMerchant && live.merchant_code && live.merchant_code !== expectedMerchant) {
-    errors.push("merchant_code: mismatch");
-  }
-
-  const nowIso = new Date().toISOString();
-  const transaction_id = live.transaction_id ?? null;
-  const transaction_code = live.transaction_code ?? null;
-
-  // Solo PAID + sin errores completa paid_at.
-  const esPaidValido = live.status === "PAID" && errors.length === 0;
-
-  const update: Record<string, unknown> = {
-    status: live.status,
-    transaction_id,
-    transaction_code,
-    last_webhook_at: nowIso,
-    last_webhook_payload: sanitized,
-    verification_errors: errors.length > 0 ? { errors } : null,
-  };
-  if (esPaidValido) {
-    update.paid_at = nowIso;
-  }
-
-  const { error: updErr } = await admin
-    .from("e2e_sumup_tests")
-    .update(update)
-    .eq("id", row.id);
-  if (updErr) {
-    return NextResponse.json(
-      { ok: false, error: "e2e: db update fallo", detail: updErr.message },
-      { status: 500 }
-    );
-  }
-
-  if (!esPaidValido) {
-    return NextResponse.json({
-      ok: true,
-      note: "e2e: evento registrado",
-      status: live.status,
-      errors: errors.length > 0 ? errors : undefined,
-    });
-  }
-
-  return NextResponse.json({
-    ok: true,
-    note: "e2e: PAID verificado y registrado",
-    transaction_id,
-    transaction_code,
-  });
-}
