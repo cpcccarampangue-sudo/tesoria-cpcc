@@ -67,6 +67,16 @@ export type ReconciliacionResult =
     }
   | {
       resultado: "solicitud_no_encontrada";
+    }
+  | {
+      // Error inesperado en la RPC core o en el flujo DB. Devolvemos
+      // code/message/details/hint para diagnosticar sin perder info.
+      resultado: "error_rpc";
+      stage: "rpc_core" | "lookup_solicitud" | "update_adopcion" | "desconocido";
+      code: string | null;
+      message: string;
+      details: string | null;
+      hint: string | null;
     };
 
 type GetLiveOut =
@@ -188,12 +198,20 @@ export async function reconciliarPagoSocio(
 
   // 3) Invocar RPC core (SELECT FOR UPDATE + repara estados parciales).
   const expectedMerchant = process.env.SUMUP_MERCHANT_CODE ?? null;
+  // Cast defensivo: SumUp a veces entrega amount como number con decimales
+  // tras parse de JSON de alguna otra ruta. La columna socio_solicitudes.
+  // monto_cuota es int y la RPC espera int.
+  const amountInt =
+    typeof live.amount === "number"
+      ? Math.round(live.amount)
+      : Number.parseInt(String(live.amount), 10);
+
   const { data: coreData, error: coreErr } = await admin.rpc(
     "reconciliar_pago_socio_core",
     {
       p_solicitud_id: solicitud.id,
       p_live_checkout_id: live.id,
-      p_live_amount: live.amount,
+      p_live_amount: amountInt,
       p_live_currency: live.currency,
       p_live_merchant_code: live.merchant_code ?? null,
       p_live_checkout_reference: live.checkout_reference ?? null,
@@ -203,11 +221,42 @@ export async function reconciliarPagoSocio(
     }
   );
   if (coreErr) {
-    throw new Error(`reconciliar_pago_socio_core RPC fallo: ${coreErr.message}`);
+    // Supabase REST devuelve PostgrestError con code/message/details/hint.
+    // Lo propagamos estructurado para que el endpoint/webhook devuelvan JSON.
+    const perr = coreErr as unknown as {
+      code?: string | null;
+      message?: string;
+      details?: string | null;
+      hint?: string | null;
+    };
+    console.error(
+      "[reconciliar-pago] RPC core error",
+      JSON.stringify({
+        code: perr.code ?? null,
+        message: perr.message ?? "",
+        details: perr.details ?? null,
+        hint: perr.hint ?? null,
+      })
+    );
+    return {
+      resultado: "error_rpc",
+      stage: "rpc_core",
+      code: perr.code ?? null,
+      message: perr.message ?? "RPC core sin message",
+      details: perr.details ?? null,
+      hint: perr.hint ?? null,
+    };
   }
   const row = Array.isArray(coreData) ? coreData[0] : coreData;
   if (!row) {
-    throw new Error("reconciliar_pago_socio_core devolvio vacio");
+    return {
+      resultado: "error_rpc",
+      stage: "rpc_core",
+      code: null,
+      message: "reconciliar_pago_socio_core devolvio vacio",
+      details: null,
+      hint: null,
+    };
   }
   const core: ReconciliacionCore = {
     resultado: row.resultado,

@@ -254,6 +254,23 @@ async function procesarSocio(
       );
     case "solicitud_no_encontrada":
       return NextResponse.json({ ok: true, note: "solicitud desaparecida" });
+    case "error_rpc":
+      // Loguear el detalle (ya enmascarado por reconciliar-pago) y
+      // devolver 500 para que SumUp reintente el webhook despues.
+      console.error(
+        "[webhook SumUp] error_rpc",
+        JSON.stringify({
+          stage: result.stage,
+          code: result.code,
+          message: result.message,
+          details: result.details,
+          hint: result.hint,
+        })
+      );
+      return NextResponse.json(
+        { error: "error_rpc", stage: result.stage, code: result.code },
+        { status: 500 }
+      );
   }
 }
 

@@ -26,59 +26,86 @@ function maskId(id: string | null | undefined): string {
 }
 
 export async function POST(req: NextRequest) {
-  await requireDirectiva();
-
-  let body: unknown = {};
   try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
-  const b = body as { solicitud_id?: string; checkout_id?: string };
-  const solicitudId = typeof b.solicitud_id === "string" ? b.solicitud_id : null;
-  const checkoutId = typeof b.checkout_id === "string" ? b.checkout_id : null;
-  if (!solicitudId && !checkoutId) {
+    await requireDirectiva();
+
+    let body: unknown = {};
+    try {
+      body = await req.json();
+    } catch {
+      body = {};
+    }
+    const b = body as { solicitud_id?: string; checkout_id?: string };
+    const solicitudId = typeof b.solicitud_id === "string" ? b.solicitud_id : null;
+    const checkoutId = typeof b.checkout_id === "string" ? b.checkout_id : null;
+    if (!solicitudId && !checkoutId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          stage: "parse_body",
+          error: "body requiere { solicitud_id: uuid } o { checkout_id: text }",
+        },
+        { status: 400 }
+      );
+    }
+
+    const admin = createSupabaseAdminClient();
+    const result = solicitudId
+      ? await reconciliarPagoSocio(admin, {
+          modo: "por_solicitud_id",
+          solicitudId,
+        })
+      : await reconciliarPagoSocio(admin, {
+          modo: "por_checkout_id",
+          checkoutId: checkoutId as string,
+        });
+
+    // Enmascarar movimiento_id en el resultado.
+    const safe =
+      result.resultado === "reconciliada" || result.resultado === "ya_reconciliada"
+        ? {
+            ...result,
+            core: {
+              ...result.core,
+              movimiento_id_mask: maskId(result.core.movimiento_id),
+              movimiento_id: undefined,
+            },
+          }
+        : result;
+
+    const httpStatus =
+      result.resultado === "mismatch"
+        ? 409
+        : result.resultado === "solicitud_no_encontrada"
+        ? 404
+        : result.resultado === "sumup_no_disponible"
+        ? 502
+        : result.resultado === "error_rpc"
+        ? 500
+        : 200;
+
+    return NextResponse.json({ ok: result.resultado !== "error_rpc", ...safe }, { status: httpStatus });
+  } catch (err) {
+    const e = err as { code?: string; message?: string; details?: string; hint?: string };
+    console.error(
+      "[reconciliar-pago] uncaught",
+      JSON.stringify({
+        code: e.code ?? null,
+        message: e.message ?? "",
+        details: e.details ?? null,
+        hint: e.hint ?? null,
+      })
+    );
     return NextResponse.json(
       {
         ok: false,
-        error: "body requiere { solicitud_id: uuid } o { checkout_id: text }",
+        stage: "uncaught",
+        code: e.code ?? null,
+        error: e.message ?? String(err),
+        details: e.details ?? null,
+        hint: e.hint ?? null,
       },
-      { status: 400 }
+      { status: 500 }
     );
   }
-
-  const admin = createSupabaseAdminClient();
-  const result = solicitudId
-    ? await reconciliarPagoSocio(admin, {
-        modo: "por_solicitud_id",
-        solicitudId,
-      })
-    : await reconciliarPagoSocio(admin, {
-        modo: "por_checkout_id",
-        checkoutId: checkoutId as string,
-      });
-
-  // Enmascarar movimiento_id en el resultado.
-  const safe =
-    result.resultado === "reconciliada" || result.resultado === "ya_reconciliada"
-      ? {
-          ...result,
-          core: {
-            ...result.core,
-            movimiento_id_mask: maskId(result.core.movimiento_id),
-            movimiento_id: undefined, // no exponemos el uuid completo
-          },
-        }
-      : result;
-
-  const httpStatus =
-    result.resultado === "mismatch"
-      ? 409
-      : result.resultado === "solicitud_no_encontrada"
-      ? 404
-      : result.resultado === "sumup_no_disponible"
-      ? 502
-      : 200;
-
-  return NextResponse.json(safe, { status: httpStatus });
 }
