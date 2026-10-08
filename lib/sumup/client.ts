@@ -46,19 +46,57 @@ export type CheckoutResp = {
   checkout_reference: string;
   amount: number;
   currency: string;
+  merchant_code?: string;
   status: "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELED";
   // URL a donde redirigir al apoderado para pagar (SumUp hosted page).
+  // SumUp a veces devuelve esto como `hosted_checkout_url`.
   checkout_url?: string;
+  hosted_checkout_url?: string;
   // Si ya se completo, trae datos de la transaccion.
   transaction_id?: string;
   transaction_code?: string;
 };
+
+// Error estructurado de SumUp para que el callsite pueda inspeccionar
+// status/body sin perder detalle (y para que el log sea diagnosticable).
+export class SumUpError extends Error {
+  readonly status: number;
+  readonly bodyText: string;
+  readonly path: string;
+  readonly method: string;
+  constructor(opts: {
+    status: number;
+    bodyText: string;
+    path: string;
+    method: string;
+    detail: string;
+  }) {
+    super(
+      `SumUp ${opts.method} ${opts.path} fallo HTTP ${opts.status}: ${opts.detail}`
+    );
+    this.name = "SumUpError";
+    this.status = opts.status;
+    this.bodyText = opts.bodyText;
+    this.path = opts.path;
+    this.method = opts.method;
+  }
+}
+
+// Sanitiza un body de respuesta SumUp para loguear sin exponer secretos
+// propios (nunca mandamos secretos en el body, pero el response puede
+// incluir metadatos de merchant que preferimos limitar). Trunca a 500 chars.
+function sanitizeForLog(bodyText: string): string {
+  const t = bodyText.trim();
+  if (t.length === 0) return "<empty>";
+  return t.length > 500 ? t.slice(0, 500) + "…" : t;
+}
 
 async function sumupFetch<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
   const key = requireEnv("SUMUP_API_KEY");
+  const method = init.method ?? "GET";
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -71,20 +109,44 @@ async function sumupFetch<T>(
     cache: "no-store",
   });
   const text = await res.text();
+  if (!res.ok) {
+    // Extraer un detail legible del body si viene como JSON SumUp
+    // (usualmente { "message": "...", "error_code": "...", "detail": "..." }).
+    let detail = `HTTP ${res.status}`;
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const parts: string[] = [];
+      if (typeof parsed.message === "string") parts.push(parsed.message);
+      if (typeof parsed.detail === "string") parts.push(parsed.detail);
+      if (typeof parsed.error_code === "string")
+        parts.push(`code=${parsed.error_code}`);
+      if (parts.length > 0) detail = parts.join(" | ");
+    } catch {
+      // body no es JSON: dejamos HTTP <status>
+    }
+    throw new SumUpError({
+      status: res.status,
+      bodyText: text,
+      path,
+      method,
+      detail,
+    });
+  }
   let body: unknown = null;
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
     body = text;
   }
-  if (!res.ok) {
-    const msg =
-      body && typeof body === "object" && "message" in body
-        ? String((body as { message?: unknown }).message)
-        : `HTTP ${res.status}`;
-    throw new Error(`SumUp ${init.method ?? "GET"} ${path} fallo: ${msg}`);
-  }
   return body as T;
+}
+
+// Re-export para quienes quieran loguear detalle sin importar la clase.
+export function describeSumUpError(err: unknown): string {
+  if (err instanceof SumUpError) {
+    return `${err.message} body=${sanitizeForLog(err.bodyText)}`;
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function crearCheckout(
@@ -102,6 +164,11 @@ export async function crearCheckout(
     personal_details: input.payerName
       ? { first_name: input.payerName }
       : undefined,
+    // Pide a SumUp que exponga una pagina hosted lista para redirigir
+    // (devuelve checkout.hosted_checkout_url / checkout_url). Sin este
+    // flag SumUp solo devuelve el id y hay que implementar el widget
+    // propio con el SDK — no es lo que queremos.
+    hosted_checkout: { enabled: true },
   };
   return await sumupFetch<CheckoutResp>("/checkouts", {
     method: "POST",
