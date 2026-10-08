@@ -29,6 +29,39 @@ function sanitize(text: string): string {
   return t.length > 1000 ? t.slice(0, 1000) + "…" : t;
 }
 
+// Enmascara PII para que el response se pueda pegar en el chat.
+// Preserva lo que necesita el diagnostico (longitud, formato basico)
+// pero oculta identidad.
+function maskId(id: string | null | undefined): string {
+  if (!id) return "<null>";
+  return id.length <= 8 ? "***" : `${id.slice(0, 8)}…`;
+}
+function maskEmail(e: string | null | undefined): string {
+  if (!e) return "<null>";
+  const at = e.indexOf("@");
+  if (at < 1) return "***";
+  const user = e.slice(0, at);
+  const dom = e.slice(at + 1);
+  const userMask = user.length <= 2 ? "*" : user[0] + "***";
+  const dot = dom.lastIndexOf(".");
+  const domMask =
+    dot > 0
+      ? dom[0] + "***" + dom.slice(dot)
+      : dom[0] + "***";
+  return `${userMask}@${domMask}`;
+}
+function maskName(n: string | null | undefined): string {
+  if (!n) return "<null>";
+  return n
+    .split(/\s+/)
+    .map((w) => (w.length <= 1 ? w : w[0] + "***"))
+    .join(" ");
+}
+// Para el redirect_url que lleva el token embebido.
+function maskUrlToken(url: string): string {
+  return url.replace(/token=([^&]+)/, (_, t) => `token=${maskId(t)}`);
+}
+
 function webhookNotificationUrl(): string {
   const explicit = process.env.SUMUP_WEBHOOK_URL;
   if (explicit) return explicit;
@@ -71,15 +104,16 @@ export async function GET(req: Request) {
   const solicitud = solData as SocioSolicitud;
 
   // Snapshot del estado actual de la solicitud (antes de intentar nada).
+  // PII enmascarada para que se pueda pegar el JSON en un chat.
   const solicitudSnapshot = {
-    id: solicitud.id,
-    qr_token: solicitud.qr_token,
+    id_mask: maskId(solicitud.id),
+    qr_token_mask: maskId(solicitud.qr_token),
     estado: solicitud.estado,
     periodo_anio: solicitud.periodo_anio,
     monto_cuota: solicitud.monto_cuota,
     sumup_checkout_id_actual: solicitud.sumup_checkout_id,
-    apoderado_email: solicitud.apoderado_email,
-    apoderado_nombre: solicitud.apoderado_nombre,
+    apoderado_email_mask: maskEmail(solicitud.apoderado_email),
+    apoderado_nombre_mask: maskName(solicitud.apoderado_nombre),
     created_at: solicitud.created_at,
   };
 
@@ -124,11 +158,25 @@ export async function GET(req: Request) {
     redirect_url: `${siteUrl()}/incorporacion/pago?token=${solicitud.qr_token}`,
   };
 
-  // Request/body se devuelven en el JSON para transparencia total.
+  // Request body: devolvemos todos los campos, pero enmascarando PII
+  // en los que pueden identificar a la familia. Preserva longitudes,
+  // monto, currency, merchant_code, return_url (publico) y los flags.
+  const bodySanitized: Record<string, unknown> = {
+    checkout_reference: `socio_${maskId(solicitud.id)}`,
+    amount: body.amount,
+    currency: body.currency,
+    merchant_code: body.merchant_code,
+    description: `Cuota socio CdP ${solicitud.periodo_anio} - ${maskName(solicitud.apoderado_nombre)}`,
+    return_url: body.return_url,
+    pay_to_email: maskEmail(solicitud.apoderado_email),
+    personal_details: { first_name: maskName(solicitud.apoderado_nombre) },
+    hosted_checkout: body.hosted_checkout,
+    redirect_url: maskUrlToken(body.redirect_url as string),
+  };
   const requestEnviado = {
     url: `${API_BASE}/checkouts`,
     method: "POST",
-    body,
+    body: bodySanitized,
   };
 
   let res: Response;
@@ -161,13 +209,41 @@ export async function GET(req: Request) {
 
   const bodyText = await res.text();
 
-  // Response parseado (si JSON).
+  // Response parseado (si JSON). Enmascaramos campos PII conocidos que
+  // SumUp a veces hace echo del request en el response.
   let bodyParsed: unknown = null;
   try {
     bodyParsed = bodyText ? JSON.parse(bodyText) : null;
   } catch {
     bodyParsed = null;
   }
+  if (bodyParsed && typeof bodyParsed === "object") {
+    const o = bodyParsed as Record<string, unknown>;
+    if (typeof o.checkout_reference === "string") {
+      o.checkout_reference = `socio_${maskId(solicitud.id)}`;
+    }
+    if (typeof o.description === "string") {
+      o.description = `Cuota socio CdP ${solicitud.periodo_anio} - ${maskName(solicitud.apoderado_nombre)}`;
+    }
+    if (typeof o.pay_to_email === "string") {
+      o.pay_to_email = maskEmail(solicitud.apoderado_email);
+    }
+    if (typeof o.redirect_url === "string") {
+      o.redirect_url = maskUrlToken(o.redirect_url);
+    }
+    if (o.personal_details && typeof o.personal_details === "object") {
+      const pd = o.personal_details as Record<string, unknown>;
+      if (typeof pd.first_name === "string") {
+        pd.first_name = maskName(solicitud.apoderado_nombre);
+      }
+    }
+  }
+  // El body_raw lo omitimos para no exponer PII sin enmascarar; si el
+  // response no fue JSON parseable, devolvemos un prefijo de 200 chars
+  // literal (SumUp en ese caso suele mandar HTML de error sin PII).
+  const bodyRawPreview = bodyParsed
+    ? "<json en body_parsed>"
+    : sanitize(bodyText.slice(0, 200));
 
   // En caso de error, extraemos el detalle como lo haria el helper real.
   let detail: string | undefined;
@@ -186,7 +262,7 @@ export async function GET(req: Request) {
     sumup_response: {
       status_code: res.status,
       status_text: res.statusText,
-      body_raw: sanitize(bodyText),
+      body_raw_preview: bodyRawPreview,
       body_parsed: bodyParsed,
       detail_legible: detail,
     },
