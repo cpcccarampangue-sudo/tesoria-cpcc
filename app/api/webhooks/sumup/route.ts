@@ -1,222 +1,224 @@
-// Webhook de SumUp: notifica cuando un checkout cambia de estado.
-// Al confirmarse un pago (status "PAID"), marcamos la solicitud como
-// pagada, guardamos el transaction_id y disparamos el envio del QR al
-// correo del apoderado.
+// Webhook de SumUp Online Payments.
 //
-// Configurar la URL del webhook en SumUp dashboard apuntando a:
-//   https://<dominio>/api/webhooks/sumup
+// SumUp notifica cambios de estado del checkout (CHECKOUT_STATUS_CHANGED).
+// Al confirmarse un pago (PAID), marcamos la solicitud como pagada,
+// guardamos transaction_id y disparamos el envio del QR por correo.
 //
-// SumUp firma el payload con SUMUP_WEBHOOK_SECRET; verificamos la firma
-// antes de procesar.
+// Configurar URL del webhook en SumUp dashboard apuntando a:
+//   https://tesoreria.centropadrescarampangue.cl/api/webhooks/sumup
+//
+// Firma HMAC: OPCIONAL. SumUp Online Payments no exige firma por default.
+// Si viene (en X-Payload-Signature o X-Sumup-Signature) y es valida con
+// SUMUP_WEBHOOK_SECRET, la aceptamos como defensa adicional. Si viene y
+// es invalida, rechazamos 401. Si no viene, procesamos igual: la fuente
+// de verdad es GET /v0.1/checkouts/{id} con nuestra SUMUP_API_KEY
+// (ningun atacante puede forzar un PAID falso sin pagar en SumUp real).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { verificarFirmaWebhook, obtenerCheckout } from "@/lib/sumup/client";
+import {
+  verificarFirmaWebhook,
+  obtenerCheckout,
+  type CheckoutResp,
+} from "@/lib/sumup/client";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { handleE2ETest } from "@/lib/sumup/e2e-handler";
 import type { SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type WebhookPayload = {
-  event_type?: string; // ej: "checkout.paid"
-  id?: string; // id del checkout o transaccion
-  payload?: {
-    checkout_reference?: string;
-    checkout_id?: string;
-    transaction_id?: string;
-    transaction_code?: string;
-    status?: string;
-  };
+// Solo nos interesa este event_type (unico de Online Payments relevante
+// para checkouts). Otros eventos de SumUp (merchant updates, etc.) se
+// ignoran con 2xx.
+const EVENT_RELEVANTE = "CHECKOUT_STATUS_CHANGED";
+
+// Headers de firma que SumUp documenta/ha usado. Si algun dia agregan
+// uno nuevo, lo incluimos aqui sin cambiar la logica.
+const HEADERS_FIRMA = ["x-payload-signature", "x-sumup-signature"];
+
+type MinimalPayload = {
+  event_type?: string;
+  id?: string;
+  // Algunos eventos tambien traen payload.checkout_id; lo consideramos
+  // como ultimo fallback para extraer el id. No parseamos nada mas del
+  // payload: la fuente de verdad es el GET live.
+  payload?: { checkout_id?: string };
 };
 
 export async function POST(req: NextRequest) {
-  // Leer raw body para verificar firma
   const rawBody = await req.text();
-  const firma =
-    req.headers.get("x-payload-signature") ??
-    req.headers.get("x-sumup-signature");
 
-  const firmaValida = await verificarFirmaWebhook(rawBody, firma);
-  if (!firmaValida) {
-    return NextResponse.json(
-      { error: "firma invalida" },
-      { status: 401 }
-    );
+  // 1) Firma OPCIONAL. Solo valida si viene algun header reconocido.
+  let firmaHeaderNombre: string | null = null;
+  let firmaHeaderValor: string | null = null;
+  for (const h of HEADERS_FIRMA) {
+    const v = req.headers.get(h);
+    if (v) {
+      firmaHeaderNombre = h;
+      firmaHeaderValor = v;
+      break;
+    }
+  }
+  if (firmaHeaderValor) {
+    const firmaValida = await verificarFirmaWebhook(rawBody, firmaHeaderValor);
+    if (!firmaValida) {
+      console.warn("[webhook SumUp] firma presente pero invalida; header=" + firmaHeaderNombre);
+      return NextResponse.json({ error: "firma invalida" }, { status: 401 });
+    }
   }
 
-  let event: WebhookPayload;
+  // 2) Parseo minimo. Si el body no es JSON, 400.
+  let event: MinimalPayload;
   try {
-    event = JSON.parse(rawBody) as WebhookPayload;
+    event = JSON.parse(rawBody) as MinimalPayload;
   } catch {
     return NextResponse.json({ error: "body invalido" }, { status: 400 });
   }
 
-  // SumUp envia payloads con formas variadas segun el tipo de evento:
-  //   - A veces trae payload.checkout_reference directamente.
-  //   - A veces trae payload.checkout_id (UUID).
-  //   - A veces solo trae event.id = UUID del checkout (sin payload).
-  // En cualquier caso, el UNICO identificador confiable para resolver
-  // nuestros datos es llamar a GET /v0.1/checkouts/{id} y leer el
-  // checkout_reference real.
-  //
-  // Estrategia:
-  //   1) Intentar sacar checkout_reference directo del payload si viene.
-  //   2) Si no, sacar un UUID candidato (payload.checkout_id o event.id)
-  //      y resolver via API para obtener checkout_reference real.
-  //   3) Con el checkout_reference en mano, decidir el branch.
-
-  const refDirecta = event.payload?.checkout_reference ?? null;
-  const idCandidato =
+  const eventType = event.event_type ?? null;
+  const checkoutId =
+    (typeof event.id === "string" ? event.id : null) ??
     event.payload?.checkout_id ??
-    (typeof event.id === "string" ? event.id : null);
+    null;
 
-  let refResuelta: string | null = refDirecta;
-  let liveCheckout: Awaited<ReturnType<typeof obtenerCheckout>> | null = null;
+  // 3) Log seguro (sin PII): solo campos tecnicos del evento.
+  const logBase = {
+    event_type: eventType,
+    checkout_id: checkoutId ? checkoutId.slice(0, 8) + "…" : null,
+    firma_header_recibido: firmaHeaderNombre,
+    firma_valida: firmaHeaderValor ? true : null, // true si pasó validación arriba
+  };
+  console.info("[webhook SumUp] in:", JSON.stringify(logBase));
 
-  if (!refResuelta && idCandidato) {
-    try {
-      liveCheckout = await obtenerCheckout(idCandidato);
-      refResuelta = liveCheckout.checkout_reference ?? null;
-    } catch (err) {
-      console.error(
-        "[webhook SumUp] no se pudo resolver checkout desde id:",
-        idCandidato,
-        err instanceof Error ? err.message : String(err)
-      );
-    }
+  // 4) event_type desconocido → 2xx sin hacer nada (SumUp no reintentara).
+  if (eventType && eventType !== EVENT_RELEVANTE) {
+    console.info(
+      "[webhook SumUp] event_type ignorado:",
+      eventType
+    );
+    return NextResponse.json({
+      ok: true,
+      note: `event_type ${eventType} ignorado`,
+    });
   }
 
-  if (!refResuelta) {
-    console.warn(
-      "[webhook SumUp] evento sin referencia resoluble:",
-      JSON.stringify({
-        event_type: event.event_type,
-        id: event.id,
-        payload_keys: event.payload ? Object.keys(event.payload) : null,
-      })
-    );
+  // 5) Sin checkout_id no hay nada que hacer. 2xx para no reintentar.
+  if (!checkoutId) {
+    console.warn("[webhook SumUp] evento sin checkout id, ignorado");
+    return NextResponse.json({ ok: true, note: "sin checkout id" });
+  }
+
+  // 6) GET live al checkout — fuente de verdad.
+  let live: CheckoutResp;
+  try {
+    live = await obtenerCheckout(checkoutId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[webhook SumUp] obtenerCheckout fallo:", msg);
+    // 502: no retomamos como "no procesado"; devolvemos error para que
+    // SumUp pueda reintentar y nos autoreparemos cuando SumUp responda.
     return NextResponse.json(
-      { ok: true, note: "evento sin referencia resoluble, ignorado" },
-      { status: 200 }
+      { error: "no se pudo revalidar checkout en SumUp", detail: msg },
+      { status: 502 }
     );
   }
 
-  const ref = refResuelta;
-
-  // ================================================================
-  // BRANCH TEMPORAL E2E (ver 028_e2e_sumup_tests.sql y
-  // app/api/debug/sumup-e2e/*). Las referencias "sumup_e2e_test_*"
-  // NO ejecutan logica de incorporacion: solo escriben estado en la
-  // tabla temporal e2e_sumup_tests para diagnostico.
-  //
-  // EARLY RETURN garantizado: handleE2ETest siempre devuelve un
-  // NextResponse (sea referencia huerfana, verificacion fallida o
-  // PAID verificado). Nunca cae al codigo de abajo que busca en
-  // socio_solicitudes. Eliminar junto con la migracion 029.
-  // ================================================================
-  if (ref.startsWith("sumup_e2e_test_")) {
-    return handleE2ETest(ref, event, liveCheckout);
+  // 7) Validar merchant: el checkout debe pertenecer a NUESTRO merchant.
+  const expectedMerchant = process.env.SUMUP_MERCHANT_CODE;
+  if (
+    expectedMerchant &&
+    live.merchant_code &&
+    live.merchant_code !== expectedMerchant
+  ) {
+    console.error("[webhook SumUp] merchant_code no coincide, ignorado");
+    return NextResponse.json(
+      { error: "merchant_code mismatch" },
+      { status: 409 }
+    );
   }
 
+  const refLive = live.checkout_reference ?? null;
+  if (!refLive) {
+    console.warn("[webhook SumUp] checkout sin reference, ignorado");
+    return NextResponse.json({ ok: true, note: "sin reference" });
+  }
+
+  // Log del resultado live (sin PII).
+  console.info(
+    "[webhook SumUp] live:",
+    JSON.stringify({
+      checkout_id: live.id.slice(0, 8) + "…",
+      ref: refLive,
+      status: live.status,
+      amount: live.amount,
+      currency: live.currency,
+    })
+  );
+
+  // 8) Ruteo por prefijo de reference.
+  //    - sumup_e2e_test_* → branch temporal E2E (nunca toca socios).
+  //    - socio_<id>       → flujo normal de incorporacion.
+  //    - otro             → sin solicitud asociada, 2xx.
+  if (refLive.startsWith("sumup_e2e_test_")) {
+    // Early return garantizado por diseño: handleE2ETest siempre
+    // devuelve NextResponse. Eliminar junto con migracion 029.
+    return handleE2ETest(refLive, { event_type: eventType ?? undefined, id: checkoutId, payload: { checkout_id: checkoutId } }, live);
+  }
+
+  if (!refLive.startsWith("socio_")) {
+    console.info("[webhook SumUp] reference desconocida, ignorada:", refLive);
+    return NextResponse.json({ ok: true, note: "reference desconocida" });
+  }
+
+  return await procesarSocio(refLive, live);
+}
+
+// ================================================================
+// Procesamiento del flujo de socios (refLive = "socio_<id>")
+// ================================================================
+async function procesarSocio(
+  refLive: string,
+  live: CheckoutResp
+): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
 
-  // Buscar nuestra solicitud por el patron "socio_<id>" en la ref ya
-  // resuelta (viene del payload o del GET live) y, como fallback, por
-  // el sumup_checkout_id que podamos haber guardado antes.
-  let solicitud: SocioSolicitud | null = null;
-  if (ref.startsWith("socio_")) {
-    const id = ref.replace(/^socio_/, "");
-    const { data } = await supabase
+  // Buscar solicitud por el id embebido en la reference. Fallback por
+  // sumup_checkout_id (puede diferir si el checkout fue recreado).
+  const solicitudId = refLive.replace(/^socio_/, "");
+  const { data: byId } = await supabase
+    .from("socio_solicitudes")
+    .select("*")
+    .eq("id", solicitudId)
+    .maybeSingle();
+  let solicitud = (byId as SocioSolicitud | null) ?? null;
+  if (!solicitud) {
+    const { data: byCheckout } = await supabase
       .from("socio_solicitudes")
       .select("*")
-      .eq("id", id)
+      .eq("sumup_checkout_id", live.id)
       .maybeSingle();
-    solicitud = (data as SocioSolicitud | null) ?? null;
-  }
-  const checkoutIdFallback =
-    event.payload?.checkout_id ??
-    (liveCheckout ? liveCheckout.id : null) ??
-    (typeof event.id === "string" ? event.id : null);
-  if (!solicitud && checkoutIdFallback) {
-    const { data } = await supabase
-      .from("socio_solicitudes")
-      .select("*")
-      .eq("sumup_checkout_id", checkoutIdFallback)
-      .maybeSingle();
-    solicitud = (data as SocioSolicitud | null) ?? null;
+    solicitud = (byCheckout as SocioSolicitud | null) ?? null;
   }
 
   if (!solicitud) {
-    // Pago que no corresponde a ninguna solicitud nuestra. Lo ignoramos
-    // (puede ser otro flujo del mismo merchant).
-    return NextResponse.json(
-      { ok: true, note: "sin solicitud asociada" },
-      { status: 200 }
+    console.warn(
+      "[webhook SumUp] socio_solicitud no encontrada para ref:",
+      refLive
     );
+    return NextResponse.json({ ok: true, note: "sin solicitud asociada" });
   }
 
-  // Si ya esta pagada/enviada, idempotente: solo respondemos ok.
+  // Idempotencia.
   if (solicitud.estado === "pagada" || solicitud.estado === "enviada") {
     return NextResponse.json({ ok: true, note: "ya procesada" });
   }
 
-  // Defensa en profundidad: NO confiar en el payload del webhook. Hacemos
-  // GET al checkout real en SumUp y validamos monto, moneda, reference
-  // antes de marcar pagada. Si cualquier verificacion falla, loggeamos y
-  // dejamos la solicitud en pendiente_pago (nunca marcamos pagada con
-  // datos sospechosos).
-  if (!solicitud.sumup_checkout_id) {
-    console.error(
-      "[webhook SumUp] solicitud sin sumup_checkout_id, no se puede revalidar",
-      { solicitud_id: solicitud.id }
-    );
-    return NextResponse.json({
-      ok: true,
-      note: "sin sumup_checkout_id, no se procesa",
-    });
-  }
-  let live;
-  if (liveCheckout && liveCheckout.id === solicitud.sumup_checkout_id) {
-    live = liveCheckout;
-  } else {
-    try {
-      live = await obtenerCheckout(solicitud.sumup_checkout_id);
-    } catch (err) {
-      console.error(
-        "[webhook SumUp] obtenerCheckout fallo:",
-        err instanceof Error ? err.message : String(err)
-      );
-      return NextResponse.json(
-        { error: "no se pudo revalidar checkout en SumUp" },
-        { status: 502 }
-      );
-    }
-  }
-
+  // Validaciones de integridad contra el live.
   if (live.status !== "PAID") {
-    // Puede ser PENDING, FAILED, EXPIRED, CANCELED. No marcamos pagada.
     return NextResponse.json({
       ok: true,
       note: `estado ${live.status}, no se procesa`,
     });
-  }
-
-  // Verificaciones de integridad: todo debe calzar con nuestra solicitud.
-  // Si algo no coincide, es un pago sospechoso (otra transaccion, monto
-  // alterado, moneda distinta). No marcamos pagada; loggeamos para que
-  // la directiva lo revise manualmente.
-  const refEsperado = `socio_${solicitud.id}`;
-  if (live.checkout_reference !== refEsperado) {
-    console.error("[webhook SumUp] checkout_reference no coincide", {
-      esperado: refEsperado,
-      recibido: live.checkout_reference,
-      solicitud_id: solicitud.id,
-    });
-    return NextResponse.json(
-      { error: "checkout_reference no coincide" },
-      { status: 409 }
-    );
   }
   if (live.currency !== "CLP") {
     console.error("[webhook SumUp] moneda no esperada", {
@@ -224,10 +226,7 @@ export async function POST(req: NextRequest) {
       recibido: live.currency,
       solicitud_id: solicitud.id,
     });
-    return NextResponse.json(
-      { error: "moneda no coincide" },
-      { status: 409 }
-    );
+    return NextResponse.json({ error: "moneda no coincide" }, { status: 409 });
   }
   if (Number(live.amount) !== Number(solicitud.monto_cuota)) {
     console.error("[webhook SumUp] monto no coincide", {
@@ -235,19 +234,13 @@ export async function POST(req: NextRequest) {
       recibido: live.amount,
       solicitud_id: solicitud.id,
     });
-    return NextResponse.json(
-      { error: "monto no coincide" },
-      { status: 409 }
-    );
+    return NextResponse.json({ error: "monto no coincide" }, { status: 409 });
   }
 
-  // Normalizamos los datos de transaccion desde la respuesta live.
   const transaction_id = live.transaction_id ?? null;
   const transaction_code = live.transaction_code ?? null;
 
   // Crear movimiento en el libro de caja si la config lo permite.
-  // Si cuenta_sumup_id esta configurada, el pago aparece como ingreso
-  // en esa cuenta con la categoria "Cuota socio CdP".
   let movimientoId: string | null = null;
   const { data: cfgData } = await supabase
     .from("socio_config")
@@ -282,8 +275,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Marcar como pagada. transaction_id/code vienen del GET live (defensa
-  // en profundidad), no del payload del webhook.
+  // Marcar como pagada (idempotente por el if de arriba).
   const { error: updErr } = await supabase
     .from("socio_solicitudes")
     .update({
@@ -301,15 +293,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Disparar envio automatico del QR por correo.
+  // Disparar envio automatico del QR por correo. Best-effort.
   try {
     await enviarCorreoQrSocio(solicitud.id);
   } catch (err) {
-    // El pago quedo confirmado; si el correo falla, la directiva puede
-    // reenviarlo manual desde el panel. Loggeamos pero no fallamos.
     console.error("Error enviando correo QR tras webhook SumUp:", err);
   }
 
+  console.info(
+    "[webhook SumUp] out: PAID procesado",
+    JSON.stringify({ solicitud_id: solicitud.id, movimiento_id: movimientoId })
+  );
   return NextResponse.json({ ok: true, movimiento_id: movimientoId });
 }
 
@@ -318,4 +312,3 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({ ok: true, service: "sumup webhook" });
 }
-
