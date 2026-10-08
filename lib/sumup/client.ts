@@ -165,8 +165,15 @@ export function describeSumUpError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+export type RequestOpts = {
+  // Timeout del fetch en ms. Si expira, se lanza AbortError clasificable
+  // como transitorio. Default: 15000 para POST, 10000 para GET.
+  timeoutMs?: number;
+};
+
 export async function crearCheckout(
-  input: CrearCheckoutInput
+  input: CrearCheckoutInput,
+  opts: RequestOpts = {}
 ): Promise<CheckoutResp> {
   const merchantCode = requireEnv("SUMUP_MERCHANT_CODE");
   const body: Record<string, unknown> = {
@@ -194,13 +201,39 @@ export async function crearCheckout(
   return await sumupFetch<CheckoutResp>("/checkouts", {
     method: "POST",
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
   });
 }
 
 export async function obtenerCheckout(
-  checkoutId: string
+  checkoutId: string,
+  opts: RequestOpts = {}
 ): Promise<CheckoutResp> {
-  return await sumupFetch<CheckoutResp>(`/checkouts/${checkoutId}`);
+  return await sumupFetch<CheckoutResp>(`/checkouts/${checkoutId}`, {
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+  });
+}
+
+// Lista checkouts filtrados por nuestra reference. SumUp Online Payments
+// expone el filtro server-side. Si el checkout no existe, SumUp puede
+// devolver array vacio (200) o 404; tratamos ambos como "no encontrado".
+// Si la ruta responde 2xx con un objeto no-array, devolvemos array vacio
+// (no asumimos semantica desconocida).
+export async function listarCheckoutsPorReference(
+  reference: string,
+  opts: RequestOpts = {}
+): Promise<CheckoutResp[]> {
+  const path = `/checkouts?checkout_reference=${encodeURIComponent(reference)}`;
+  try {
+    const body = await sumupFetch<unknown>(path, {
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+    });
+    if (Array.isArray(body)) return body as CheckoutResp[];
+    return [];
+  } catch (err) {
+    if (err instanceof SumUpError && err.status === 404) return [];
+    throw err;
+  }
 }
 
 // Verificacion de firma del webhook. SumUp envia un header con HMAC
