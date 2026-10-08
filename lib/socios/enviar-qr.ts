@@ -1,11 +1,18 @@
 // Logica compartida para generar el QR y enviar el correo al apoderado.
 // Se llama tanto desde el webhook SumUp (automatico al confirmarse pago)
 // como desde el panel admin cuando se reenvia manualmente.
+//
+// Modelo QR permanente (Fase C):
+//   - El QR que va al correo es apoderados.qr_token (canonico por familia).
+//   - Si por algun motivo el apoderado aun no tiene qr_token (edge:
+//     solicitud sin vincular), cae a socio_solicitudes.qr_token como
+//     fallback legacy.
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreo } from "@/lib/email/mailer";
 import { armarCorreoSocioHtml } from "@/lib/email/socio-template";
 import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
+import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
 import type { SocioSolicitud } from "@/lib/types";
 
 export async function enviarCorreoQrSocio(
@@ -21,9 +28,20 @@ export async function enviarCorreoQrSocio(
   if (!data) throw new Error("Solicitud no encontrada.");
   const s = data as SocioSolicitud;
 
-  const url = urlPublicaSocio(s.qr_token);
+  // QR canonico del apoderado. Si aun no tiene, se asigna aqui.
+  // Si la solicitud no tiene apoderado_id, usamos el qr_token de la
+  // solicitud como fallback legacy (no idealmente permanente, pero
+  // mantiene el flujo funcional para solicitudes antiguas sin vincular).
+  let qrTokenPublico: string;
+  if (s.apoderado_id) {
+    qrTokenPublico = await obtenerOGenerarQrFamilia(supabase, s.apoderado_id);
+  } else {
+    qrTokenPublico = s.qr_token;
+  }
+
+  const url = urlPublicaSocio(qrTokenPublico);
   const qrDataUrl = await generarQrDataUrl(url, { size: 400 });
-  const { subject, html } = armarCorreoSocioHtml(s, qrDataUrl);
+  const { subject, html } = armarCorreoSocioHtml(s, qrDataUrl, qrTokenPublico);
 
   await enviarCorreo({
     to: s.apoderado_email,

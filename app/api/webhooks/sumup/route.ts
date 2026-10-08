@@ -23,6 +23,8 @@ import {
 } from "@/lib/sumup/client";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { handleE2ETest } from "@/lib/sumup/e2e-handler";
+import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { SocioSolicitud } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -291,6 +293,26 @@ async function procesarSocio(
       { error: `actualizando solicitud: ${updErr.message}` },
       { status: 500 }
     );
+  }
+
+  // QR permanente por familia: asegurar apoderados.qr_token antes de
+  // enviar el correo. Si no tenia QR, se genera y persiste; si ya
+  // tenia, se reutiliza. En solicitudes sin apoderado_id (edge, flujo
+  // manual que no fue vinculado) no se asigna QR aun — se asignara
+  // cuando la directiva vincule la solicitud a una familia.
+  if (solicitud.apoderado_id) {
+    try {
+      const admin = createSupabaseAdminClient();
+      await obtenerOGenerarQrFamilia(admin, solicitud.apoderado_id);
+    } catch (err) {
+      console.error(
+        "[webhook SumUp] no se pudo asignar qr_token al apoderado:",
+        err instanceof Error ? err.message : String(err)
+      );
+      // No fallamos: la solicitud ya quedo pagada; el correo intentara
+      // enviarse y si no hay qr_token del apoderado, enviar-qr tiene
+      // fallback.
+    }
   }
 
   // Disparar envio automatico del QR por correo. Best-effort.

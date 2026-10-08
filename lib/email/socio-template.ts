@@ -8,9 +8,13 @@ import { siteUrl, urlPublicaSocio } from "@/lib/qr";
 
 export function armarCorreoSocioHtml(
   solicitud: SocioSolicitud,
-  qrDataUrl: string
+  qrDataUrl: string,
+  // qr_token publico (canonico de la familia). Si se omite, cae al de
+  // la solicitud por compat con callers antiguos — nuevos callers DEBEN
+  // pasarlo explicitamente.
+  qrTokenPublico?: string
 ): { subject: string; html: string } {
-  const url = urlPublicaSocio(solicitud.qr_token);
+  const url = urlPublicaSocio(qrTokenPublico ?? solicitud.qr_token);
   const base = siteUrl();
   const subject = `Tu QR de socio ${solicitud.periodo_anio} — ${INSTITUCION_NOMBRE}`;
 

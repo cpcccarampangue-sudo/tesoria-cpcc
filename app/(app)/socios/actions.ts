@@ -5,6 +5,7 @@ import { requireDirectiva } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { precioVigente } from "@/lib/socios/precio";
+import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
 import { chileLocalToUtc } from "@/lib/tz-chile";
 
 // Valida y normaliza un Payment Link de SumUp. Debe ser https y dominio
@@ -405,7 +406,18 @@ export async function crearSocioConPagoManual(
     );
   }
 
-  // 3. Enviar QR si se solicito
+  // 3. QR permanente por familia: asegurar apoderados.qr_token
+  //    (reutiliza si ya tenia, genera si no). Es el QR que ira al correo.
+  try {
+    await obtenerOGenerarQrFamilia(supabase, input.apoderado_id);
+  } catch (err) {
+    console.error(
+      "Error asignando qr_token al apoderado tras alta manual:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // 4. Enviar QR si se solicito
   if (input.enviarQr) {
     try {
       await enviarCorreoQrSocio(solData.id);
@@ -524,6 +536,19 @@ export async function registrarPagoManualSocio(
     })
     .eq("id", input.solicitud_id);
   if (error) throw new Error(error.message);
+
+  // Asegurar qr_token permanente del apoderado (si la solicitud estaba
+  // vinculada a uno).
+  if (solicitud.apoderado_id) {
+    try {
+      await obtenerOGenerarQrFamilia(supabase, solicitud.apoderado_id);
+    } catch (err) {
+      console.error(
+        "Error asignando qr_token al apoderado tras registrar pago manual:",
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
 
   revalidatePath("/socios");
   revalidatePath(`/socios/${input.solicitud_id}`);
