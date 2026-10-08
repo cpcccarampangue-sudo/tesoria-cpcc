@@ -1,5 +1,7 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "./supabase/server";
+import { CONV_COOKIE, obtenerSesionOperador, type SesionOperadorInfo } from "./operador/sesion";
 import type { UserRole } from "./types";
 
 export type SessionProfile = {
@@ -70,6 +72,39 @@ export async function requireDirectiva(): Promise<SessionProfile> {
 
 export function isDirectiva(profile: SessionProfile | null): boolean {
   return profile?.role === "directiva";
+}
+
+// Contexto del actor autorizado a usar /validar: directiva (sesion
+// Supabase normal) u operador de convenio (cookie conv_session).
+export type ValidadorContexto =
+  | { tipo: "directiva"; profile: SessionProfile }
+  | { tipo: "operador"; sesion: SesionOperadorInfo };
+
+// Devuelve el contexto si hay autorizacion vigente, null si no.
+// NO redirige. Util para páginas que quieren decidir que mostrar.
+export async function getValidadorContexto(): Promise<ValidadorContexto | null> {
+  // 1) Directiva (sesion Supabase + rol).
+  const profile = await getSessionProfile();
+  if (profile?.role === "directiva") {
+    return { tipo: "directiva", profile };
+  }
+  // 2) Operador (cookie conv_session + sesion activa + operador y
+  //    convenio activos). obtenerSesionOperador ya hace las verificaciones.
+  const c = await cookies();
+  const token = c.get(CONV_COOKIE)?.value ?? null;
+  const sesion = await obtenerSesionOperador(token);
+  if (sesion) return { tipo: "operador", sesion };
+  return null;
+}
+
+// Como requireDirectiva pero acepta tambien operador autorizado. Si no
+// hay ningun contexto valido, redirige a /validar/acceso (flujo publico
+// de login operador). Nunca degrada la seguridad existente: directiva
+// sigue pasando igual que con requireDirectiva.
+export async function requireValidador(): Promise<ValidadorContexto> {
+  const ctx = await getValidadorContexto();
+  if (ctx) return ctx;
+  redirect("/validar/acceso");
 }
 
 export function roleLabel(role: UserRole): string {

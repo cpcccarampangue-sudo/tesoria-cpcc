@@ -6,11 +6,11 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizarEmail } from "@/lib/normalizar";
 import type { Convenio, ConvenioConOperadores, ConvenioOperador } from "./tipos";
 
-// Valida y normaliza la URL del logo. Solo acepta http(s). Rechaza
-// javascript:, data:, file:, etc. (defensa contra XSS si la URL se
-// renderiza en <img src>). Trim, limite de largo razonable, y vacio -> null.
-// Usado tanto en el admin manual como en el importador de planilla, donde
-// la fuente no es confiable.
+// Valida y normaliza la URL del logo. Solo acepta HTTPS (rechaza http,
+// javascript:, data:, file:, etc.). Defensa contra XSS si la URL se
+// renderiza en <img src> y contra downgrade a transporte inseguro.
+// Trim, limite de largo razonable, vacio -> null. Usado en el admin
+// manual y en el importador de planilla (fuentes no confiables).
 function normalizarLogoUrl(input: string | null | undefined): string | null {
   if (input === null || input === undefined) return null;
   const v = String(input).trim();
@@ -18,9 +18,9 @@ function normalizarLogoUrl(input: string | null | undefined): string | null {
   if (v.length > 2000) {
     throw new Error("La URL del logo es demasiado larga.");
   }
-  if (!/^https?:\/\/\S+$/i.test(v)) {
+  if (!/^https:\/\/\S+$/i.test(v)) {
     throw new Error(
-      "La URL del logo debe comenzar con http:// o https:// (sin espacios)."
+      "La URL del logo debe comenzar con https:// (sin espacios)."
     );
   }
   return v;

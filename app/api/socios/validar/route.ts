@@ -14,8 +14,11 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { getValidadorContexto, type ValidadorContexto } from "@/lib/auth";
+import { hmacAudit } from "@/lib/audit/hmac";
 
 export const dynamic = "force-dynamic";
 
@@ -61,8 +64,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // Actor REQUERIDO: directiva o operador. Si no hay contexto, devolvemos
+  // generico (sin filtrar que no estan autenticados) — pero NO escribimos
+  // log (el CHECK XOR en validaciones_log exige actor).
+  const ctx = await getValidadorContexto();
+  if (!ctx) return invalida();
+
+  const metodo = (req.nextUrl.searchParams.get("metodo") === "manual"
+    ? "manual"
+    : "qr") as "qr" | "manual";
+
   const token = req.nextUrl.searchParams.get("token")?.trim();
   if (!token || !UUID_V4_RE.test(token)) {
+    await registrarLog(ctx, metodo, "no_vigente", token ?? null, null);
     return invalida();
   }
 
@@ -71,7 +85,7 @@ export async function GET(req: NextRequest) {
     supabase
       .from("socio_solicitudes")
       .select(
-        "apoderado_nombre, estado, periodo_anio"
+        "apoderado_id, apoderado_nombre, estado, periodo_anio"
       )
       .eq("qr_token", token)
       .maybeSingle(),
@@ -80,30 +94,42 @@ export async function GET(req: NextRequest) {
 
   const solicitud = solData as Pick<
     SocioSolicitud,
-    "apoderado_nombre" | "estado" | "periodo_anio"
+    "apoderado_id" | "apoderado_nombre" | "estado" | "periodo_anio"
   > | null;
   const config = cfgData as SocioConfig | null;
   const periodoVigente = config?.periodo_anio ?? new Date().getFullYear();
+  const apoderadoId = solicitud?.apoderado_id ?? null;
 
-  // Cualquier caso que no sea un socio vigente devuelve el mismo
-  // mensaje generico (ver constante arriba).
-  if (!solicitud) return invalida();
-  if (solicitud.estado !== "pagada" && solicitud.estado !== "enviada") {
+  if (!solicitud) {
+    await registrarLog(ctx, metodo, "no_vigente", token, null);
     return invalida();
   }
-  if (solicitud.periodo_anio !== periodoVigente) return invalida();
+  if (solicitud.estado !== "pagada" && solicitud.estado !== "enviada") {
+    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
+    return invalida();
+  }
+  if (solicitud.periodo_anio !== periodoVigente) {
+    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
+    return invalida();
+  }
 
   const hoy = new Date().toISOString().slice(0, 10);
-  if (config?.periodo_inicio && hoy < config.periodo_inicio) return invalida();
-  if (config?.periodo_fin && hoy > config.periodo_fin) return invalida();
+  if (config?.periodo_inicio && hoy < config.periodo_inicio) {
+    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
+    return invalida();
+  }
+  if (config?.periodo_fin && hoy > config.periodo_fin) {
+    await registrarLog(ctx, metodo, "no_vigente", token, apoderadoId);
+    return invalida();
+  }
 
-  // Respuesta MINIMIZADA: nombre reducido, sin alumnos, sin fechas de
-  // pago, sin montos. "Pamela Rodriguez Caceres" -> "Pamela R."
   const displayName = reducirNombre(solicitud.apoderado_nombre);
   const validUntil = formatearVigencia(
     config?.periodo_fin ?? null,
     periodoVigente
   );
+
+  await registrarLog(ctx, metodo, "vigente", token, apoderadoId);
 
   return NextResponse.json<RespuestaValida>({
     valid: true,
@@ -113,6 +139,44 @@ export async function GET(req: NextRequest) {
     validUntil,
     periodo: periodoVigente,
   });
+}
+
+// Best-effort: inserta en validaciones_log con pseudonimizacion por HMAC.
+// NUNCA propaga excepcion al flujo (si DB falla, log pierde la entrada
+// pero la validacion al operador no se ve afectada).
+async function registrarLog(
+  ctx: ValidadorContexto,
+  metodo: "qr" | "manual",
+  resultado: "vigente" | "no_vigente" | "error",
+  qrToken: string | null,
+  apoderadoId: string | null
+): Promise<void> {
+  try {
+    const admin = createSupabaseAdminClient();
+    const qrHmac = qrToken ? hmacAudit(qrToken) : null;
+    const campos =
+      ctx.tipo === "directiva"
+        ? {
+            convenio_id: null,
+            convenio_operador_id: null,
+            directiva_actor_hmac: hmacAudit(ctx.profile.id),
+          }
+        : {
+            convenio_id: ctx.sesion.convenioId,
+            convenio_operador_id: ctx.sesion.convenioOperadorId,
+            directiva_actor_hmac: null,
+          };
+    await admin.from("validaciones_log").insert({
+      ...campos,
+      metodo,
+      resultado,
+      qr_token_hmac: qrHmac,
+      apoderado_id: apoderadoId,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
+    console.error("[validar/api] registrarLog fallo:", msg);
+  }
 }
 
 function invalida(): NextResponse<RespuestaInvalida> {

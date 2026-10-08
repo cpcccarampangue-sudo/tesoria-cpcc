@@ -1,6 +1,6 @@
 import { PublicHeader } from "@/components/public-header";
 import { PublicFooter } from "@/components/public-footer";
-import { requireDirectiva } from "@/lib/auth";
+import { requireValidador, type ValidadorContexto } from "@/lib/auth";
 import { ValidadorClient } from "./validador-client";
 
 export const metadata = {
@@ -9,11 +9,11 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ValidarPage() {
-  // El validador solo esta accesible para directiva. Si no hay sesion
-  // o el rol no es directiva, requireDirectiva() redirige a /login o
-  // /dashboard respectivamente. Cuando se implemente el modulo
-  // convenios, agregar un chequeo adicional para rol operador aqui.
-  await requireDirectiva();
+  // Acepta directiva autenticada O sesion operador con convenio activo.
+  // Si no hay ninguno de los dos, redirige a /validar/acceso (flujo
+  // publico OTP de operador). El acceso de directiva NO cambio: sigue
+  // pasando igual que antes via requireDirectiva en el fondo.
+  const ctx: ValidadorContexto = await requireValidador();
 
   const anio = new Date().getFullYear();
   return (
@@ -41,6 +41,42 @@ export default async function ValidarPage() {
 
       {/* Card principal */}
       <div className="flex-1 w-full max-w-xl mx-auto px-4 sm:px-6 pb-8">
+        {ctx.tipo === "operador" && (
+          <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3">
+            {ctx.sesion.convenioLogoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={ctx.sesion.convenioLogoUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                className="w-12 h-12 rounded-lg object-contain bg-white border border-emerald-200 flex-shrink-0"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.visibility =
+                    "hidden";
+                }}
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-lg bg-white border border-emerald-200 flex-shrink-0" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-800">
+                Convenio autorizado
+              </div>
+              <div className="text-base font-semibold text-slate-900 truncate">
+                {ctx.sesion.convenioNombre}
+              </div>
+            </div>
+            <form action="/validar/logout" method="post">
+              <button
+                type="submit"
+                className="text-xs font-medium text-slate-600 hover:text-slate-900 underline underline-offset-2"
+              >
+                Cerrar sesión
+              </button>
+            </form>
+          </div>
+        )}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
           <ValidadorClient />
         </div>

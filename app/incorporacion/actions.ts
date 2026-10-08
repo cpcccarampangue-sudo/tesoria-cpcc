@@ -536,7 +536,7 @@ export async function solicitarOtp(email: string): Promise<SolicitarOtpResult> {
       return { ok: true };
     }
 
-    const emisor = await emitirCodigo(emailNorm, ip);
+    const emisor = await emitirCodigo(emailNorm, "incorporacion", ip);
     if (!emisor.ok) {
       if (emisor.motivo === "reenvio_muy_rapido") {
         return { ok: true, reintentarEnSeg: emisor.segundosRestantes };
@@ -614,7 +614,7 @@ export async function verificarOtp(
       return { ok: false, motivo: "codigo_invalido" };
     }
 
-    const res = await verificarCodigo(emailNorm, codigoLimpio, ip);
+    const res = await verificarCodigo(emailNorm, codigoLimpio, "incorporacion", ip);
     if (!res.ok) {
       console.log(
         "[otp] verificar",
@@ -668,7 +668,7 @@ export async function estadoPostOtp(): Promise<EstadoPostOtp> {
     const c = await cookies();
     const sid = c.get(OTP_COOKIE)?.value;
     if (!sid) return { caso: "sin_sesion" };
-    const sesion = await obtenerSesion(sid);
+    const sesion = await obtenerSesion(sid, "incorporacion");
     if (!sesion) return { caso: "sin_sesion" };
 
     const familia = await resolverFamiliaPorEmail(sesion.email);
@@ -706,7 +706,7 @@ async function requerirSesionOtp(email: string): Promise<string> {
   const c = await cookies();
   const sid = c.get(OTP_COOKIE)?.value;
   if (!sid) throw new Error("Tu sesión expiró. Vuelve a ingresar el código.");
-  const sesion = await obtenerSesion(sid);
+  const sesion = await obtenerSesion(sid, "incorporacion");
   if (!sesion) {
     throw new Error("Tu sesión expiró. Vuelve a ingresar el código.");
   }

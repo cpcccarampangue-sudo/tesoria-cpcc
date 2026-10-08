@@ -33,6 +33,8 @@ export default async function ConvenioDetallePage({
           <img
             src={convenio.logo_url}
             alt=""
+            referrerPolicy="no-referrer"
+            loading="lazy"
             className="w-14 h-14 rounded-xl object-contain bg-slate-100 flex-shrink-0"
           />
         ) : (

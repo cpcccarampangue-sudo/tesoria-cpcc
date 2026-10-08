@@ -44,9 +44,20 @@ export function generarCodigo(): string {
   return n.toString().padStart(OTP_LEN, "0");
 }
 
-export function hashOtp(codigo: string, email: string): string {
+// purpose entra al hash: un OTP emitido para "incorporacion" NO puede
+// matchear como "operador" aunque se intente verificar con mismo email y
+// codigo — el hash sera distinto.
+export type OtpPurpose = "incorporacion" | "operador";
+
+export function hashOtp(
+  codigo: string,
+  email: string,
+  purpose: OtpPurpose
+): string {
   const h = crypto.createHash("sha256");
-  h.update(`${pepper()}|${email.toLowerCase().trim()}|${codigo}`);
+  h.update(
+    `${pepper()}|${purpose}|${email.toLowerCase().trim()}|${codigo}`
+  );
   return h.digest("hex");
 }
 
@@ -65,31 +76,36 @@ export type EmitirResultado =
   | { ok: false; motivo: "limite_por_correo" };
 
 // Verifica cuotas por correo (3/15min) + reenvio minimo (60s), invalida
-// cualquier codigo anterior vigente y emite uno nuevo. NO revela si el
-// correo existe en la base de apoderados.
+// cualquier codigo anterior vigente del mismo (email, purpose) y emite
+// uno nuevo. NO revela si el correo existe en la base de apoderados.
+// purpose se guarda en DB y forma parte del hash — un codigo emitido con
+// purpose='incorporacion' JAMAS verificara con purpose='operador'.
 export async function emitirCodigo(
   email: string,
+  purpose: OtpPurpose,
   ip: string | null
 ): Promise<EmitirResultado> {
   const supabase = createSupabaseAdminClient();
   const emailNorm = email.toLowerCase().trim();
 
-  // Limite por correo: 3 solicitudes cada 15 min.
+  // Limite por correo (del mismo proposito): 3 solicitudes cada 15 min.
   const desde15 = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const { count: countCorreo } = await supabase
     .from("otp_codigos")
     .select("id", { count: "exact", head: true })
     .eq("email", emailNorm)
+    .eq("purpose", purpose)
     .gte("created_at", desde15);
   if ((countCorreo ?? 0) >= 3) {
     return { ok: false, motivo: "limite_por_correo" };
   }
 
-  // Reenvio minimo: 60s desde el ultimo codigo.
+  // Reenvio minimo: 60s desde el ultimo codigo del mismo proposito.
   const { data: ultimo } = await supabase
     .from("otp_codigos")
     .select("created_at")
     .eq("email", emailNorm)
+    .eq("purpose", purpose)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -104,21 +120,22 @@ export async function emitirCodigo(
     }
   }
 
-  // Invalidar codigos anteriores vigentes del mismo correo.
+  // Invalidar codigos anteriores vigentes del mismo (correo, purpose).
   await supabase
     .from("otp_codigos")
     .update({ invalidado_en: new Date().toISOString() })
     .eq("email", emailNorm)
+    .eq("purpose", purpose)
     .is("invalidado_en", null)
     .is("usado_en", null);
 
-  // Emitir uno nuevo.
   const codigo = generarCodigo();
-  const codigoHash = hashOtp(codigo, emailNorm);
+  const codigoHash = hashOtp(codigo, emailNorm, purpose);
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
   const { error } = await supabase.from("otp_codigos").insert({
     email: emailNorm,
+    purpose,
     codigo_hash: codigoHash,
     expires_at: expiresAt,
     ip,
@@ -138,20 +155,23 @@ export type VerificarResultado =
 
 // Verifica un codigo. Devuelve el sesionId para setear la cookie si OK.
 // NO revela si el correo tenia o no un codigo asociado (en los dos casos
-// devuelve codigo_invalido).
+// devuelve codigo_invalido). La busqueda filtra por (email, purpose) y
+// el hash tambien incluye purpose: un codigo emitido con otro purpose
+// no matchea.
 export async function verificarCodigo(
   email: string,
   codigo: string,
+  purpose: OtpPurpose,
   ip: string | null
 ): Promise<VerificarResultado> {
   const supabase = createSupabaseAdminClient();
   const emailNorm = email.toLowerCase().trim();
 
-  // Buscar el ultimo codigo activo del correo.
   const { data: fila } = await supabase
     .from("otp_codigos")
     .select("id, codigo_hash, intentos, expires_at, usado_en, invalidado_en")
     .eq("email", emailNorm)
+    .eq("purpose", purpose)
     .is("usado_en", null)
     .is("invalidado_en", null)
     .order("created_at", { ascending: false })
@@ -179,11 +199,24 @@ export async function verificarCodigo(
   }
 
   const esperado = fila.codigo_hash as string;
-  const candidato = hashOtp(codigo.trim(), emailNorm);
-  const match = timingSafeEqualHex(esperado, candidato);
+  const candidato = hashOtp(codigo.trim(), emailNorm, purpose);
+  let match = timingSafeEqualHex(esperado, candidato);
+
+  // Fallback legacy SOLO para incorporacion durante la ventana de
+  // transicion post-deploy de Fase 3. Un codigo emitido antes del deploy
+  // tiene hash sin purpose (formato "pepper|email|codigo"); se le
+  // permite validar para no romper flujos en curso. Despues del TTL
+  // maximo del codigo (10 min), este branch nunca se activa. Eliminar
+  // en una limpieza futura — DEUDA EXPLICITA.
+  if (!match && purpose === "incorporacion") {
+    const legacy = crypto
+      .createHash("sha256")
+      .update(`${pepper()}|${emailNorm}|${codigo.trim()}`)
+      .digest("hex");
+    match = timingSafeEqualHex(esperado, legacy);
+  }
 
   if (!match) {
-    // Incrementamos intentos; si pasa el max, invalidamos.
     const nuevoIntentos = fila.intentos + 1;
     const patch: Record<string, unknown> = { intentos: nuevoIntentos };
     if (nuevoIntentos >= OTP_MAX_INTENTOS) {
@@ -196,19 +229,17 @@ export async function verificarCodigo(
     return { ok: false, motivo: "codigo_invalido" };
   }
 
-  // Marcar como usado.
   await supabase
     .from("otp_codigos")
     .update({ usado_en: new Date().toISOString() })
     .eq("id", fila.id);
 
-  // Crear sesion de 30 min.
   const expiresAt = new Date(
     Date.now() + SESION_TTL_MIN * 60 * 1000
   ).toISOString();
   const { data: sesion, error } = await supabase
     .from("otp_sesiones")
-    .insert({ email: emailNorm, expires_at: expiresAt, ip })
+    .insert({ email: emailNorm, purpose, expires_at: expiresAt, ip })
     .select("id")
     .single();
   if (error || !sesion) {
@@ -223,15 +254,20 @@ export async function verificarCodigo(
 export type Sesion = {
   id: string;
   email: string;
+  purpose: OtpPurpose;
   expires_at: string;
   used_at: string | null;
 };
 
-// Lee la sesion por id (viene de la cookie). Devuelve null si no existe,
-// expiro, o ya fue consumida.
-export async function obtenerSesion(id: string): Promise<Sesion | null> {
+// Lee la sesion por id + purpose. Devuelve null si no existe, no coincide
+// el purpose, expiro, o ya fue consumida. El filtro por purpose es parte
+// REAL de la validacion: una cookie de incorporacion no puede abrir un
+// flujo operador aunque el UUID exista.
+export async function obtenerSesion(
+  id: string,
+  purpose: OtpPurpose
+): Promise<Sesion | null> {
   if (!id) return null;
-  // Validamos forma UUID antes de pegar a la DB.
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       id
@@ -242,8 +278,9 @@ export async function obtenerSesion(id: string): Promise<Sesion | null> {
   const supabase = createSupabaseAdminClient();
   const { data } = await supabase
     .from("otp_sesiones")
-    .select("id, email, expires_at, used_at")
+    .select("id, email, purpose, expires_at, used_at")
     .eq("id", id)
+    .eq("purpose", purpose)
     .maybeSingle();
   if (!data) return null;
   const s = data as Sesion;

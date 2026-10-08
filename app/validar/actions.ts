@@ -2,16 +2,17 @@
 
 import crypto from "crypto";
 import { headers } from "next/headers";
-import { requireDirectiva } from "@/lib/auth";
+import { requireValidador, type ValidadorContexto } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { sinTildes, soloDigitos } from "@/lib/normalizar";
+import { hmacAudit } from "@/lib/audit/hmac";
 import type { Apoderado, Contacto, SocioConfig } from "@/lib/types";
 
 // Server actions del validador para el metodo "Buscar por apellido".
-// Todos requieren sesion de directiva. En el futuro, cuando llegue el
-// modulo convenios, se agrega el chequeo de rol operador aqui mismo
-// (reemplazar requireDirectiva por requireValidador o similar).
+// Acepta directiva (sesion Supabase) o operador (cookie conv_session con
+// convenio+operador activos). requireValidador() valida ambos casos sin
+// debilitar los chequeos existentes de directiva.
 
 // Longitud minima del apellido para evitar enumeracion masiva.
 const APELLIDO_MIN = 3;
@@ -25,12 +26,12 @@ const RL_BUSCAR_WIN_MS = 10 * 60 * 1000; // 30/10min por usuario+IP
 const RL_CONFIRMAR_MAX = 15;
 const RL_CONFIRMAR_WIN_MS = 10 * 60 * 1000;
 
-async function rateLimitKey(sufijo: string, userId: string): Promise<string> {
+async function rateLimitKey(sufijo: string, actorKey: string): Promise<string> {
   const h = await headers();
-  // Combinamos user + IP: colegio con red compartida no bloquea a varias
-  // familias legitimas (porque cada operador autenticado tiene su propia
-  // sesion); pero el abuso desde una sola sesion queda limitado.
-  return `${sufijo}:${userId}:${clientIp(h)}`;
+  // Combinamos actor + IP: red compartida no bloquea a varios actores
+  // legitimos (cada sesion tiene su propio key); pero el abuso desde una
+  // sola sesion queda limitado.
+  return `${sufijo}:${actorKey}:${clientIp(h)}`;
 }
 
 function assertRateLimit(key: string, max: number, windowMs: number) {
@@ -40,6 +41,73 @@ function assertRateLimit(key: string, max: number, windowMs: number) {
       `Demasiadas búsquedas. Espera ${r.retryAfterSeconds} segundos.`
     );
   }
+}
+
+// Key opaca del actor para rate limit: user.id si directiva,
+// convenio_operador_id si operador. Nunca mezclan buckets.
+function actorKey(ctx: ValidadorContexto): string {
+  return ctx.tipo === "directiva"
+    ? `d:${ctx.profile.id}`
+    : `o:${ctx.sesion.convenioOperadorId}`;
+}
+
+type LogActorFields = {
+  convenio_id: string | null;
+  convenio_operador_id: string | null;
+  directiva_actor_hmac: string | null;
+};
+
+// Construye los campos de actor para validaciones_log segun el contexto.
+// IMPORTANTE: convenio_id SIEMPRE se saca del contexto server, nunca del
+// cliente. El CHECK socio_config_origen_coherente se encarga de impedir
+// combinaciones invalidas (ya validadas aqui como defensa adicional).
+function actorFields(ctx: ValidadorContexto): LogActorFields {
+  if (ctx.tipo === "directiva") {
+    return {
+      convenio_id: null,
+      convenio_operador_id: null,
+      directiva_actor_hmac: hmacAudit(ctx.profile.id),
+    };
+  }
+  return {
+    convenio_id: ctx.sesion.convenioId,
+    convenio_operador_id: ctx.sesion.convenioOperadorId,
+    directiva_actor_hmac: null,
+  };
+}
+
+type RegistrarLogInput = {
+  ctx: ValidadorContexto;
+  metodo: "qr" | "manual" | "apellido";
+  resultado: "vigente" | "no_vigente" | "error";
+  qrToken?: string | null;
+  apoderadoId?: string | null;
+};
+
+// Best-effort: nunca propaga excepcion al flujo. Si falla, logea y sigue.
+async function registrarValidacion(input: RegistrarLogInput): Promise<void> {
+  try {
+    const supabase = createSupabaseAdminClient();
+    const campos = actorFields(input.ctx);
+    const qrHmac = input.qrToken ? hmacAudit(input.qrToken) : null;
+    await supabase.from("validaciones_log").insert({
+      ...campos,
+      metodo: input.metodo,
+      resultado: input.resultado,
+      qr_token_hmac: qrHmac,
+      apoderado_id: input.apoderadoId ?? null,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "unknown";
+    console.error("[validar] registrarValidacion fallo:", msg);
+  }
+}
+
+// Exportado para uso desde /api/socios/validar (endpoint HTTP del QR).
+export async function registrarValidacionDesdeHandler(
+  input: RegistrarLogInput
+): Promise<void> {
+  return registrarValidacion(input);
 }
 
 // DTO reducido devuelto por buscarFamiliaPorApellido. Ninguna informacion
@@ -65,9 +133,9 @@ export type BuscarResultado = {
 export async function buscarFamiliaPorApellido(
   consulta: string
 ): Promise<BuscarResultado> {
-  const perfil = await requireDirectiva();
+  const ctx = await requireValidador();
   assertRateLimit(
-    await rateLimitKey("validar:buscar-apellido", perfil.id),
+    await rateLimitKey("validar:buscar-apellido", actorKey(ctx)),
     RL_BUSCAR_MAX,
     RL_BUSCAR_WIN_MS
   );
@@ -101,7 +169,7 @@ export async function buscarFamiliaPorApellido(
   if (ids.length === 0) {
     console.log(
       "[validar] buscar-apellido",
-      `user=${perfil.id} resultados=0 q_hash=${hashCorto(q)}`
+      `actor=${actorKey(ctx)} resultados=0 q_hash=${hashCorto(q)}`
     );
     return { familias: [], hayMas: false };
   }
@@ -128,7 +196,7 @@ export async function buscarFamiliaPorApellido(
 
   console.log(
     "[validar] buscar-apellido",
-    `user=${perfil.id} resultados=${familias.length} q_hash=${hashCorto(q)}`
+    `actor=${actorKey(ctx)} resultados=${familias.length} q_hash=${hashCorto(q)}`
   );
   return { familias, hayMas };
 }
@@ -155,9 +223,9 @@ export async function confirmarIdentidadYValidar(
   apoderadoId: string,
   digitos: string
 ): Promise<ConfirmarResultado> {
-  const perfil = await requireDirectiva();
+  const ctx = await requireValidador();
   assertRateLimit(
-    await rateLimitKey("validar:confirmar", perfil.id),
+    await rateLimitKey("validar:confirmar", actorKey(ctx)),
     RL_CONFIRMAR_MAX,
     RL_CONFIRMAR_WIN_MS
   );
@@ -190,7 +258,7 @@ export async function confirmarIdentidadYValidar(
   if (telefonos.length === 0) {
     console.log(
       "[validar] confirmar",
-      `user=${perfil.id} apod=${apoderadoId} no_disponible`
+      `actor=${actorKey(ctx)} apod=${apoderadoId} no_disponible`
     );
     return { ok: false, motivo: "no_disponible" };
   }
@@ -212,8 +280,14 @@ export async function confirmarIdentidadYValidar(
   if (!match) {
     console.log(
       "[validar] confirmar",
-      `user=${perfil.id} apod=${apoderadoId} pin_mismatch`
+      `actor=${actorKey(ctx)} apod=${apoderadoId} pin_mismatch`
     );
+    await registrarValidacion({
+      ctx,
+      metodo: "apellido",
+      resultado: "no_vigente",
+      apoderadoId,
+    });
     return { ok: true, valid: false };
   }
 
@@ -248,24 +322,47 @@ export async function confirmarIdentidadYValidar(
   if (!sol || sol.periodo_anio !== periodoVigente) {
     console.log(
       "[validar] confirmar",
-      `user=${perfil.id} apod=${apoderadoId} ok_no_vigente`
+      `actor=${actorKey(ctx)} apod=${apoderadoId} ok_no_vigente`
     );
+    await registrarValidacion({
+      ctx,
+      metodo: "apellido",
+      resultado: "no_vigente",
+      apoderadoId,
+    });
     return { ok: true, valid: false };
   }
 
-  // Validacion por fecha del periodo.
   const hoy = new Date().toISOString().slice(0, 10);
   if (config?.periodo_inicio && hoy < config.periodo_inicio) {
+    await registrarValidacion({
+      ctx,
+      metodo: "apellido",
+      resultado: "no_vigente",
+      apoderadoId,
+    });
     return { ok: true, valid: false };
   }
   if (config?.periodo_fin && hoy > config.periodo_fin) {
+    await registrarValidacion({
+      ctx,
+      metodo: "apellido",
+      resultado: "no_vigente",
+      apoderadoId,
+    });
     return { ok: true, valid: false };
   }
 
   console.log(
     "[validar] confirmar",
-    `user=${perfil.id} apod=${apoderadoId} ok_vigente`
+    `actor=${actorKey(ctx)} apod=${apoderadoId} ok_vigente`
   );
+  await registrarValidacion({
+    ctx,
+    metodo: "apellido",
+    resultado: "vigente",
+    apoderadoId,
+  });
   return {
     ok: true,
     valid: true,

@@ -96,8 +96,9 @@ function SeccionConvenios({
                       <img
                         src={c.logo_url}
                         alt=""
-                        className="w-8 h-8 rounded object-contain bg-slate-100 flex-shrink-0"
+                        referrerPolicy="no-referrer"
                         loading="lazy"
+                        className="w-8 h-8 rounded object-contain bg-slate-100 flex-shrink-0"
                       />
                     ) : (
                       <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-xs text-slate-400 flex-shrink-0">
