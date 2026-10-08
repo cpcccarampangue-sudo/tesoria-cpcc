@@ -330,6 +330,17 @@ export type SocioConfig = {
   cuenta_sumup_id: string | null;
   categoria_cuota_id: string | null;
   mensaje_bienvenida: string | null;
+  // Links sociales editables desde /socios/config (migracion 031).
+  // Null -> boton oculto en el correo. Precedencia: DB -> env var fallback.
+  cpcc_instagram_url: string | null;
+  cpcc_whatsapp_url: string | null;
+  cpcc_convenios_url: string | null;
+  // Textos del correo post-pago editables desde /socios/config.
+  // Null -> default hardcodeado. Placeholders: {{nombre}}, {{periodo}}, {{monto}}.
+  correo_bienvenida_asunto: string | null;
+  correo_bienvenida_cuerpo: string | null;
+  correo_renovacion_asunto: string | null;
+  correo_renovacion_cuerpo: string | null;
   updated_at: string;
 };
 
@@ -372,6 +383,10 @@ export type SocioSolicitud = {
   estado: SocioEstado;
   notas_internas: string | null;
   procesada_por: string | null;
+  // Snapshot inmutable del tipo de correo decidido al crear la solicitud.
+  // Independiente de UPDATEs posteriores de apoderados.socio_periodo.
+  // Null en solicitudes legacy (pre-migracion 032).
+  tipo_correo: "bienvenida" | "renovacion" | null;
   created_at: string;
   updated_at: string;
 };

@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enviarCorreoQrSocio } from "@/lib/socios/enviar-qr";
 import { precioVigente } from "@/lib/socios/precio";
 import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
+import { determinarTipoCorreo } from "@/lib/socios/tipo-correo";
 import { chileLocalToUtc } from "@/lib/tz-chile";
 
 // Valida y normaliza un Payment Link de SumUp. Debe ser https y dominio
@@ -182,7 +183,51 @@ export type ActualizarConfigInput = {
   cuenta_sumup_id: string | null;
   categoria_cuota_id: string | null;
   mensaje_bienvenida: string | null;
+  // Correos socios (migracion 031). Null => fallback a texto default.
+  cpcc_instagram_url: string | null;
+  cpcc_whatsapp_url: string | null;
+  cpcc_convenios_url: string | null;
+  correo_bienvenida_asunto: string | null;
+  correo_bienvenida_cuerpo: string | null;
+  correo_renovacion_asunto: string | null;
+  correo_renovacion_cuerpo: string | null;
 };
+
+// Valida y normaliza una URL opcional para correos socios. Solo https.
+// Vacio -> null. Lanza si invalida.
+function validarUrlHttps(input: string | null | undefined, campo: string): string | null {
+  if (input === null || input === undefined) return null;
+  const v = String(input).trim();
+  if (v === "") return null;
+  if (v.length > 2000) throw new Error(`${campo}: URL demasiado larga.`);
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new Error(`${campo}: URL inválida.`);
+  }
+  if (u.protocol !== "https:") {
+    throw new Error(`${campo}: debe comenzar con https://.`);
+  }
+  return v;
+}
+
+function validarAsunto(input: string | null | undefined, campo: string): string | null {
+  if (input === null || input === undefined) return null;
+  const v = String(input).trim();
+  if (v === "") return null;
+  if (v.length > 200) throw new Error(`${campo}: máximo 200 caracteres.`);
+  if (/\n/.test(v)) throw new Error(`${campo}: no debe contener saltos de línea.`);
+  return v;
+}
+
+function validarCuerpo(input: string | null | undefined, campo: string): string | null {
+  if (input === null || input === undefined) return null;
+  const v = String(input).trim();
+  if (v === "") return null;
+  if (v.length > 5000) throw new Error(`${campo}: máximo 5000 caracteres.`);
+  return v;
+}
 
 export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   await requireDirectiva();
@@ -254,6 +299,13 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
       cuenta_sumup_id: input.cuenta_sumup_id,
       categoria_cuota_id: input.categoria_cuota_id,
       mensaje_bienvenida: input.mensaje_bienvenida,
+      cpcc_instagram_url: validarUrlHttps(input.cpcc_instagram_url, "URL Instagram"),
+      cpcc_whatsapp_url: validarUrlHttps(input.cpcc_whatsapp_url, "URL WhatsApp"),
+      cpcc_convenios_url: validarUrlHttps(input.cpcc_convenios_url, "URL Convenios"),
+      correo_bienvenida_asunto: validarAsunto(input.correo_bienvenida_asunto, "Asunto bienvenida"),
+      correo_bienvenida_cuerpo: validarCuerpo(input.correo_bienvenida_cuerpo, "Cuerpo bienvenida"),
+      correo_renovacion_asunto: validarAsunto(input.correo_renovacion_asunto, "Asunto renovación"),
+      correo_renovacion_cuerpo: validarCuerpo(input.correo_renovacion_cuerpo, "Cuerpo renovación"),
       updated_at: new Date().toISOString(),
     })
     .eq("id", 1);
@@ -262,6 +314,114 @@ export async function actualizarSocioConfig(input: ActualizarConfigInput) {
   revalidatePath("/socios/config");
   revalidatePath("/incorporacion");
   revalidatePath("/socios/nuevo");
+}
+
+// Preview del correo socio para /socios/config. Admite overrides del
+// formulario (sin guardar) para mostrar como quedaria antes de aplicar.
+// Devuelve subject + html con datos ficticios (Familia Gonzalez).
+export type PreviewOverrides = {
+  cpcc_instagram_url?: string | null;
+  cpcc_whatsapp_url?: string | null;
+  cpcc_convenios_url?: string | null;
+  correo_bienvenida_asunto?: string | null;
+  correo_bienvenida_cuerpo?: string | null;
+  correo_renovacion_asunto?: string | null;
+  correo_renovacion_cuerpo?: string | null;
+};
+
+export async function previewCorreoSocio(
+  tipo: "bienvenida" | "renovacion",
+  overrides: PreviewOverrides = {}
+): Promise<{ subject: string; html: string }> {
+  await requireDirectiva();
+  const supabase = await createSupabaseServerClient();
+  const { data: cfgData } = await supabase
+    .from("socio_config")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+  const config = cfgData as import("@/lib/types").SocioConfig | null;
+  const configConOverrides = config
+    ? ({
+        ...config,
+        cpcc_instagram_url:
+          overrides.cpcc_instagram_url !== undefined
+            ? overrides.cpcc_instagram_url || null
+            : config.cpcc_instagram_url,
+        cpcc_whatsapp_url:
+          overrides.cpcc_whatsapp_url !== undefined
+            ? overrides.cpcc_whatsapp_url || null
+            : config.cpcc_whatsapp_url,
+        cpcc_convenios_url:
+          overrides.cpcc_convenios_url !== undefined
+            ? overrides.cpcc_convenios_url || null
+            : config.cpcc_convenios_url,
+        correo_bienvenida_asunto:
+          overrides.correo_bienvenida_asunto !== undefined
+            ? overrides.correo_bienvenida_asunto || null
+            : config.correo_bienvenida_asunto,
+        correo_bienvenida_cuerpo:
+          overrides.correo_bienvenida_cuerpo !== undefined
+            ? overrides.correo_bienvenida_cuerpo || null
+            : config.correo_bienvenida_cuerpo,
+        correo_renovacion_asunto:
+          overrides.correo_renovacion_asunto !== undefined
+            ? overrides.correo_renovacion_asunto || null
+            : config.correo_renovacion_asunto,
+        correo_renovacion_cuerpo:
+          overrides.correo_renovacion_cuerpo !== undefined
+            ? overrides.correo_renovacion_cuerpo || null
+            : config.correo_renovacion_cuerpo,
+      } as import("@/lib/types").SocioConfig)
+    : null;
+
+  // Datos ficticios: Familia Gonzalez. Monto segun precioVigente.
+  const periodo = config?.periodo_anio ?? new Date().getFullYear();
+  const monto = config ? precioVigente(config) : 20000;
+
+  // QR data URL dummy (1x1 pixel transparente) — no renderiza un QR real
+  // pero mantiene el layout del correo.
+  const qrDataUrl =
+    "data:image/svg+xml;base64," +
+    Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="#f1f5f9"/><text x="120" y="130" text-anchor="middle" font-family="monospace" font-size="14" fill="#64748b">QR DE EJEMPLO</text></svg>'
+    ).toString("base64");
+
+  const fakeSolicitud: import("@/lib/types").SocioSolicitud = {
+    id: "00000000-0000-0000-0000-000000000000",
+    qr_token: "00000000-0000-0000-0000-000000000000",
+    periodo_anio: periodo,
+    apoderado_id: null,
+    apoderado_nombre: "Familia González",
+    apoderado_email: "familia.gonzalez@example.cl",
+    apoderado_rut: null,
+    apoderado_telefono: null,
+    alumno_nombre: "Juan González",
+    curso: "5° Básico A",
+    monto_cuota: monto,
+    sumup_checkout_id: null,
+    sumup_transaction_id: null,
+    sumup_transaction_code: null,
+    movimiento_id: null,
+    pagada_en: new Date().toISOString(),
+    email_enviado_en: null,
+    email_reenvios: 0,
+    estado: "pagada",
+    notas_internas: null,
+    procesada_por: null,
+    tipo_correo: tipo,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { armarCorreoSocioHtml } = await import("@/lib/email/socio-template");
+  return armarCorreoSocioHtml({
+    solicitud: fakeSolicitud,
+    qrDataUrl,
+    qrTokenPublico: fakeSolicitud.qr_token,
+    tipo,
+    config: configConOverrides,
+  });
 }
 
 // Crea una solicitud de socio + registra el pago en el mismo paso, sin
@@ -381,6 +541,13 @@ export async function crearSocioConPagoManual(
     .filter(Boolean)
     .join("\n");
 
+  // Snapshot inmutable del tipo de correo (ANTES de cualquier UPDATE a
+  // apoderados.socio_periodo que pueda ocurrir despues).
+  const tipoCorreo = await determinarTipoCorreo(
+    supabase,
+    input.apoderado_id,
+    config.periodo_anio
+  );
   const { data: solData, error: solErr } = await supabase
     .from("socio_solicitudes")
     .insert({
@@ -397,6 +564,7 @@ export async function crearSocioConPagoManual(
       movimiento_id: movData.id,
       notas_internas: notaInterna,
       procesada_por: profile.id,
+      tipo_correo: tipoCorreo,
     })
     .select("id")
     .single();

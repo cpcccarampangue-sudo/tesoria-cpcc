@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { SocioConfig } from "@/lib/types";
-import { actualizarSocioConfig } from "../actions";
+import { actualizarSocioConfig, previewCorreoSocio } from "../actions";
 import { utcToChileLocal } from "@/lib/tz-chile";
 import { precioVigente } from "@/lib/socios/precio";
 
@@ -21,6 +21,15 @@ export function ConfigForm({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<
+    "bienvenida" | "renovacion" | null
+  >(null);
+  const [previewHtml, setPreviewHtml] = useState<{
+    subject: string;
+    html: string;
+    tipo: "bienvenida" | "renovacion";
+  } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [form, setForm] = useState({
     periodo_anio: String(config.periodo_anio),
     periodo_inicio: config.periodo_inicio ?? "",
@@ -34,7 +43,39 @@ export function ConfigForm({
     cuenta_sumup_id: config.cuenta_sumup_id ?? "",
     categoria_cuota_id: config.categoria_cuota_id ?? "",
     mensaje_bienvenida: config.mensaje_bienvenida ?? "",
+    cpcc_instagram_url: config.cpcc_instagram_url ?? "",
+    cpcc_whatsapp_url: config.cpcc_whatsapp_url ?? "",
+    cpcc_convenios_url: config.cpcc_convenios_url ?? "",
+    correo_bienvenida_asunto: config.correo_bienvenida_asunto ?? "",
+    correo_bienvenida_cuerpo: config.correo_bienvenida_cuerpo ?? "",
+    correo_renovacion_asunto: config.correo_renovacion_asunto ?? "",
+    correo_renovacion_cuerpo: config.correo_renovacion_cuerpo ?? "",
   });
+
+  async function handlePreview(tipo: "bienvenida" | "renovacion") {
+    setPreviewError(null);
+    setPreviewLoading(tipo);
+    try {
+      const res = await previewCorreoSocio(tipo, {
+        cpcc_instagram_url: form.cpcc_instagram_url.trim() || null,
+        cpcc_whatsapp_url: form.cpcc_whatsapp_url.trim() || null,
+        cpcc_convenios_url: form.cpcc_convenios_url.trim() || null,
+        correo_bienvenida_asunto:
+          form.correo_bienvenida_asunto.trim() || null,
+        correo_bienvenida_cuerpo:
+          form.correo_bienvenida_cuerpo.trim() || null,
+        correo_renovacion_asunto:
+          form.correo_renovacion_asunto.trim() || null,
+        correo_renovacion_cuerpo:
+          form.correo_renovacion_cuerpo.trim() || null,
+      });
+      setPreviewHtml({ ...res, tipo });
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : "Error.");
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
 
   // Preview del precio que se cobraria ahora mismo con lo que esta en el
   // formulario. Util para que la directiva vea cual es el precio vigente
@@ -131,6 +172,17 @@ export function ConfigForm({
           cuenta_sumup_id: form.cuenta_sumup_id || null,
           categoria_cuota_id: form.categoria_cuota_id || null,
           mensaje_bienvenida: form.mensaje_bienvenida.trim() || null,
+          cpcc_instagram_url: form.cpcc_instagram_url.trim() || null,
+          cpcc_whatsapp_url: form.cpcc_whatsapp_url.trim() || null,
+          cpcc_convenios_url: form.cpcc_convenios_url.trim() || null,
+          correo_bienvenida_asunto:
+            form.correo_bienvenida_asunto.trim() || null,
+          correo_bienvenida_cuerpo:
+            form.correo_bienvenida_cuerpo.trim() || null,
+          correo_renovacion_asunto:
+            form.correo_renovacion_asunto.trim() || null,
+          correo_renovacion_cuerpo:
+            form.correo_renovacion_cuerpo.trim() || null,
         });
         setSuccess("Configuración guardada.");
       } catch (err) {
@@ -417,6 +469,179 @@ export function ConfigForm({
         </p>
       </div>
 
+      <div className="border-t border-slate-200 pt-3 space-y-3">
+        <div>
+          <h3 className="font-medium text-slate-800">
+            Links sociales en los correos de socios
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Estos botones aparecen al final del correo que recibe la familia
+            tras pagar. Si dejas un campo vacío, el botón correspondiente
+            <strong> no aparece</strong>. Deben empezar con{" "}
+            <code>https://</code>.
+          </p>
+        </div>
+        <div>
+          <label className="label">URL de convenios CPCC</label>
+          <input
+            type="url"
+            className="input"
+            value={form.cpcc_convenios_url}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, cpcc_convenios_url: e.target.value }))
+            }
+            placeholder="https://tesoria-cpcc.vercel.app/convenios"
+          />
+        </div>
+        <div>
+          <label className="label">URL de Instagram CPCC</label>
+          <input
+            type="url"
+            className="input"
+            value={form.cpcc_instagram_url}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, cpcc_instagram_url: e.target.value }))
+            }
+            placeholder="https://instagram.com/cpcc_colegiocarampangue"
+          />
+        </div>
+        <div>
+          <label className="label">URL de WhatsApp CPCC</label>
+          <input
+            type="url"
+            className="input"
+            value={form.cpcc_whatsapp_url}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, cpcc_whatsapp_url: e.target.value }))
+            }
+            placeholder="https://chat.whatsapp.com/XXXXXXX"
+          />
+        </div>
+      </div>
+
+      <div className="border-t border-slate-200 pt-3 space-y-4">
+        <div>
+          <h3 className="font-medium text-slate-800">
+            Textos de los correos de socios
+          </h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Puedes personalizar el asunto y el cuerpo del correo. El diseño
+            visual (encabezado, tabla con los datos de la familia, QR y
+            botones) permanece fijo para que el correo se vea siempre
+            profesional. Si dejas un campo vacío, se usa el texto por
+            defecto.
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Variables disponibles:{" "}
+            <code>{"{{nombre}}"}</code> (nombre de la familia),{" "}
+            <code>{"{{periodo}}"}</code> (año del período),{" "}
+            <code>{"{{monto}}"}</code> (monto pagado).
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+            Correo de bienvenida (socio nuevo)
+          </div>
+          <div>
+            <label className="label">Asunto</label>
+            <input
+              type="text"
+              className="input"
+              value={form.correo_bienvenida_asunto}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  correo_bienvenida_asunto: e.target.value,
+                }))
+              }
+              maxLength={200}
+              placeholder="¡Bienvenidos como socios CPCC {{periodo}}! 💙"
+            />
+          </div>
+          <div>
+            <label className="label">Cuerpo</label>
+            <textarea
+              className="input font-mono text-xs"
+              rows={8}
+              value={form.correo_bienvenida_cuerpo}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  correo_bienvenida_cuerpo: e.target.value,
+                }))
+              }
+              maxLength={4000}
+              placeholder="Hola {{nombre}},..."
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={() => handlePreview("bienvenida")}
+            disabled={previewLoading !== null}
+          >
+            {previewLoading === "bienvenida"
+              ? "Generando..."
+              : "Vista previa bienvenida"}
+          </button>
+        </div>
+
+        <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-3">
+          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+            Correo de renovación (socio existente)
+          </div>
+          <div>
+            <label className="label">Asunto</label>
+            <input
+              type="text"
+              className="input"
+              value={form.correo_renovacion_asunto}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  correo_renovacion_asunto: e.target.value,
+                }))
+              }
+              maxLength={200}
+              placeholder="¡Gracias por renovar tu membresía CPCC {{periodo}}! 💙"
+            />
+          </div>
+          <div>
+            <label className="label">Cuerpo</label>
+            <textarea
+              className="input font-mono text-xs"
+              rows={8}
+              value={form.correo_renovacion_cuerpo}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  correo_renovacion_cuerpo: e.target.value,
+                }))
+              }
+              maxLength={4000}
+              placeholder="Hola {{nombre}},..."
+            />
+          </div>
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            onClick={() => handlePreview("renovacion")}
+            disabled={previewLoading !== null}
+          >
+            {previewLoading === "renovacion"
+              ? "Generando..."
+              : "Vista previa renovación"}
+          </button>
+        </div>
+
+        {previewError && (
+          <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
+            {previewError}
+          </div>
+        )}
+      </div>
+
       {error && (
         <div className="text-sm bg-red-50 text-red-800 rounded-md p-3">
           {error}
@@ -431,6 +656,46 @@ export function ConfigForm({
       <button className="btn-primary" disabled={pending}>
         {pending ? "Guardando..." : "Guardar configuración"}
       </button>
+
+      {previewHtml && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setPreviewHtml(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 p-3">
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500 uppercase tracking-wider">
+                  Vista previa —{" "}
+                  {previewHtml.tipo === "bienvenida"
+                    ? "bienvenida"
+                    : "renovación"}
+                </div>
+                <div className="text-sm font-medium text-slate-900 truncate">
+                  {previewHtml.subject}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="text-slate-500 hover:text-slate-900 text-sm"
+                onClick={() => setPreviewHtml(null)}
+                aria-label="Cerrar vista previa"
+              >
+                ✕
+              </button>
+            </div>
+            <iframe
+              srcDoc={previewHtml.html}
+              className="flex-1 w-full border-0 rounded-b-xl"
+              sandbox=""
+              title="Vista previa del correo"
+            />
+          </div>
+        </div>
+      )}
     </form>
   );
 }

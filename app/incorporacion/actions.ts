@@ -22,6 +22,7 @@ import { todosLosCursos } from "@/lib/cursos";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { normalizarEmail } from "@/lib/normalizar";
 import { precioVigente } from "@/lib/socios/precio";
+import { determinarTipoCorreo } from "@/lib/socios/tipo-correo";
 
 // Reexportamos desde el helper no-server para que la UI pueda importar
 // detectarTipoBusqueda y los masks sin problemas de "use server".
@@ -324,6 +325,13 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
 
   // Precio decidido en servidor segun promocion vigente ahora.
   const monto = precioVigente(config);
+  // Snapshot inmutable del tipo de correo (bienvenida/renovacion),
+  // calculado AHORA con la evidencia previa fresh. Nunca se recalcula.
+  const tipoCorreo = await determinarTipoCorreo(
+    supabase,
+    input.apoderado_id,
+    config.periodo_anio
+  );
   const { data: nueva, error } = await supabase
     .from("socio_solicitudes")
     .insert({
@@ -336,6 +344,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       curso: cursoRepr,
       // Monto SIEMPRE del servidor, nunca del cliente.
       monto_cuota: monto,
+      tipo_correo: tipoCorreo,
     })
     .select("id, qr_token")
     .single();
@@ -453,6 +462,15 @@ export async function crearSolicitudManualSocio(
 
   // Precio decidido en servidor segun promocion vigente ahora.
   const monto = precioVigente(config);
+  // Flujo manual: apoderado_id = null -> siempre bienvenida inicial.
+  // Si la directiva despues la vincula a un apoderado existente, puede
+  // ser necesario recalcular, pero por ahora dejamos bienvenida como
+  // default inmutable (es el escenario esperado para familias nuevas).
+  const tipoCorreo = await determinarTipoCorreo(
+    supabase,
+    null,
+    config.periodo_anio
+  );
   const { data: nueva, error } = await supabase
     .from("socio_solicitudes")
     .insert({
@@ -467,6 +485,7 @@ export async function crearSolicitudManualSocio(
       // Monto SIEMPRE del servidor.
       monto_cuota: monto,
       estado: "pendiente_match",
+      tipo_correo: tipoCorreo,
     })
     .select("id, qr_token")
     .single();

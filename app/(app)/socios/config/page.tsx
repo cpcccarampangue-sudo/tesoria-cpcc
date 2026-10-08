@@ -47,6 +47,13 @@ export default async function SocioConfigPage() {
     cuenta_sumup_id: null,
     categoria_cuota_id: null,
     mensaje_bienvenida: null,
+    cpcc_instagram_url: null,
+    cpcc_whatsapp_url: null,
+    cpcc_convenios_url: null,
+    correo_bienvenida_asunto: null,
+    correo_bienvenida_cuerpo: null,
+    correo_renovacion_asunto: null,
+    correo_renovacion_cuerpo: null,
     updated_at: new Date().toISOString(),
   };
   const cuentas = (cuentasData as CuentaOp[] | null) ?? [];

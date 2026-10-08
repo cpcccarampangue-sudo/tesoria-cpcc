@@ -3,11 +3,14 @@
 //   - "bienvenida"  -> primera vez que la familia paga la cuota.
 //   - "renovacion"  -> ya pago en algun periodo anterior.
 //
-// Diseño responsivo, compatible con Gmail/Outlook/Apple Mail (tablas).
-// Los botones de Convenios / Instagram / WhatsApp se renderizan solo
-// si la URL correspondiente esta en env vars (NUNCA inventar URLs).
+// Diseño HTML FIJO (tablas, botones, QR). Solo el asunto y el cuerpo
+// textual son configurables desde /socios/config.
+//
+// Placeholders aceptados en asunto/cuerpo configurables: {{nombre}},
+// {{periodo}}, {{monto}}. Se escapan como HTML antes de reemplazar
+// (nunca permiten inyeccion). Cualquier otro {{...}} queda literal.
 
-import type { SocioSolicitud } from "@/lib/types";
+import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
 import { siteUrl, urlPublicaSocio } from "@/lib/qr";
 import { linksSociales } from "@/lib/socios/links";
@@ -19,6 +22,37 @@ type Args = {
   qrDataUrl: string;
   qrTokenPublico: string;
   tipo: TipoCorreoSocio;
+  // Config para leer links sociales + textos editables. Opcional por
+  // compat con callers viejos (si no se pasa, se usa fallback env + defaults).
+  config?: SocioConfig | null;
+};
+
+// Textos default (fallback si DB no tiene override).
+const DEFAULTS = {
+  bienvenida: {
+    asunto: "¡Bienvenidos como socios CPCC {{periodo}}! 💙",
+    cuerpo:
+      "Hola {{nombre}},\n\n" +
+      "¡Bienvenidos al Centro de Padres del Colegio Carampangue!\n\n" +
+      "Tu incorporación como socio CPCC {{periodo}} fue confirmada correctamente.\n\n" +
+      "A continuación encontrarás tu QR de socio, que podrás utilizar para acreditar " +
+      "tu membresía y acceder a los beneficios y convenios disponibles para nuestros socios.\n\n" +
+      "Guarda este QR, ya que será tu identificación como socio para futuros períodos. " +
+      "Al renovar cada año, este mismo QR podrá continuar utilizándose.",
+    cierre:
+      "Gracias por ser parte del Centro de Padres y apoyar las iniciativas para nuestra comunidad escolar.",
+  },
+  renovacion: {
+    asunto: "¡Gracias por renovar tu membresía CPCC {{periodo}}! 💙",
+    cuerpo:
+      "Hola {{nombre}},\n\n" +
+      "¡Gracias por renovar tu membresía del Centro de Padres para {{periodo}}!\n\n" +
+      "Tu renovación fue confirmada correctamente y tu membresía ya se encuentra " +
+      "vigente para el nuevo período.\n\n" +
+      "Tu QR de socio continúa siendo válido. Te lo enviamos nuevamente para que " +
+      "puedas guardarlo y utilizarlo al acceder a nuestros convenios y beneficios.",
+    cierre: "Muchas gracias por seguir siendo parte de nuestra comunidad.",
+  },
 };
 
 export function armarCorreoSocioHtml(
@@ -27,7 +61,7 @@ export function armarCorreoSocioHtml(
   qrTokenPublicoLegacy?: string
 ): { subject: string; html: string } {
   // Compat: callers viejos pasan (solicitud, qrDataUrl, qrTokenPublico?).
-  // Callers nuevos pasan ({ solicitud, qrDataUrl, qrTokenPublico, tipo }).
+  // Callers nuevos pasan ({ solicitud, qrDataUrl, qrTokenPublico, tipo, config? }).
   const args: Args =
     "qrDataUrl" in (solicitudOrArgs as object) &&
     (solicitudOrArgs as Args).qrDataUrl
@@ -40,39 +74,33 @@ export function armarCorreoSocioHtml(
           tipo: "bienvenida",
         };
 
-  const { solicitud, qrDataUrl, qrTokenPublico, tipo } = args;
+  const { solicitud, qrDataUrl, qrTokenPublico, tipo, config } = args;
   const url = urlPublicaSocio(qrTokenPublico);
   const base = siteUrl();
   const anio = solicitud.periodo_anio;
 
-  const subject =
-    tipo === "renovacion"
-      ? `¡Gracias por renovar tu membresía CPCC ${anio}! 💙`
-      : `¡Bienvenidos como socios CPCC ${anio}! 💙`;
+  const vars: Record<string, string> = {
+    nombre: solicitud.apoderado_nombre,
+    periodo: String(anio),
+    monto: `$${solicitud.monto_cuota.toLocaleString("es-CL")}`,
+  };
 
-  const saludo =
+  // Leer asunto/cuerpo de config si estan seteados; fallback a defaults.
+  const asuntoTpl =
     tipo === "renovacion"
-      ? `¡Gracias por renovar tu membresía del Centro de Padres para <strong>${anio}</strong>!`
-      : `¡Bienvenidos al Centro de Padres del Colegio Carampangue!`;
-
-  const bodyIntro =
+      ? config?.correo_renovacion_asunto?.trim() || DEFAULTS.renovacion.asunto
+      : config?.correo_bienvenida_asunto?.trim() || DEFAULTS.bienvenida.asunto;
+  const cuerpoTpl =
     tipo === "renovacion"
-      ? `Tu renovación fue confirmada correctamente y tu membresía ya se encuentra vigente para el nuevo período.
-         <br/><br/>
-         <strong>Tu QR de socio continúa siendo válido.</strong>
-         Te lo enviamos nuevamente para que puedas guardarlo y utilizarlo al acceder a nuestros convenios y beneficios.`
-      : `Tu incorporación como <strong>socio CPCC ${anio}</strong> fue confirmada correctamente.
-         <br/><br/>
-         A continuación encontrarás tu <strong>QR de socio</strong>, que podrás utilizar para acreditar tu membresía y acceder a los beneficios y convenios disponibles para nuestros socios.
-         <br/><br/>
-         <strong>Guarda este QR</strong>, ya que será tu identificación como socio para futuros períodos. Al renovar cada año, este mismo QR podrá continuar utilizándose.`;
+      ? config?.correo_renovacion_cuerpo?.trim() || DEFAULTS.renovacion.cuerpo
+      : config?.correo_bienvenida_cuerpo?.trim() || DEFAULTS.bienvenida.cuerpo;
+  const cierreTxt =
+    tipo === "renovacion" ? DEFAULTS.renovacion.cierre : DEFAULTS.bienvenida.cierre;
 
-  const cierre =
-    tipo === "renovacion"
-      ? `Muchas gracias por seguir siendo parte de nuestra comunidad.`
-      : `Gracias por ser parte del Centro de Padres y apoyar las iniciativas para nuestra comunidad escolar.`;
+  const subject = aplicarPlaceholders(asuntoTpl, vars);
+  const cuerpoHtml = cuerpoATextoHtml(aplicarPlaceholders(cuerpoTpl, vars));
 
-  const botonesHtml = renderBotonesSociales();
+  const botonesHtml = renderBotonesSociales(config);
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -92,15 +120,7 @@ export function armarCorreoSocioHtml(
         </td></tr>
 
         <tr><td style="padding:24px 24px 8px;">
-          <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#0f172a;">
-            Hola <strong>${esc(solicitud.apoderado_nombre)}</strong>,
-          </p>
-          <p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#0f172a;">
-            ${saludo}
-          </p>
-          <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#334155;">
-            ${bodyIntro}
-          </p>
+          <div style="font-size:14px;line-height:1.6;color:#334155;">${cuerpoHtml}</div>
         </td></tr>
 
         <tr><td style="padding:16px 24px;text-align:center;">
@@ -136,7 +156,7 @@ export function armarCorreoSocioHtml(
         ${botonesHtml}
 
         <tr><td style="padding:16px 24px;">
-          <p style="margin:0;font-size:14px;line-height:1.6;color:#334155;">${cierre}</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#334155;">${esc(cierreTxt)}</p>
           <p style="margin:12px 0 0;font-size:14px;line-height:1.6;color:#0f172a;font-weight:600;">
             Centro de Padres Colegio Carampangue
           </p>
@@ -162,8 +182,28 @@ export function armarCorreoSocioHtml(
   return { subject, html };
 }
 
-function renderBotonesSociales(): string {
-  const l = linksSociales();
+// Reemplaza {{nombre}}, {{periodo}}, {{monto}} con los valores pasados.
+// Cualquier otro {{...}} queda literal. Valores escapados como HTML
+// solo cuando se insertan en contexto HTML (ver cuerpoATextoHtml).
+function aplicarPlaceholders(tpl: string, vars: Record<string, string>): string {
+  return tpl.replace(/\{\{\s*(nombre|periodo|monto)\s*\}\}/g, (_, k) => {
+    const v = vars[k as keyof typeof vars];
+    return v ?? "";
+  });
+}
+
+// Convierte un texto plano (con placeholders ya reemplazados) en HTML
+// seguro: escapa, convierte \n en <br>, respeta parrafos vacios como
+// separador doble.
+function cuerpoATextoHtml(txt: string): string {
+  return txt
+    .split(/\n{2,}/)
+    .map((parrafo) => `<p style="margin:0 0 12px;">${esc(parrafo).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+}
+
+function renderBotonesSociales(cfg?: SocioConfig | null): string {
+  const l = linksSociales(cfg);
   const botones: string[] = [];
   if (l.convenios) {
     botones.push(botonHtml(l.convenios, "Ver convenios", "#1d4ed8"));
