@@ -14,13 +14,19 @@ type Props = {
 // + badge naranja opcional. Nav con tabs activos marcados con color + linea
 // inferior. En mobile la nav se reduce pero sigue siendo tactil (botones de
 // 44px minimo).
+//
+// SEPARACION DE FLUJOS PUBLICOS:
+// - En /incorporacion (socios/apoderados) se muestra SOLO el tab "Incorporación".
+// - En /validar (comercios/convenios) se muestra SOLO el tab "Validar socio".
+// El logo tambien linkea a la ruta del contexto activo, para no cruzar flujos.
 export function PublicHeader({ activa, badge }: Props) {
+  const homeHref = activa === "validar" ? "/validar" : "/incorporacion";
   return (
     <header className="w-full bg-white border-b border-slate-200 sticky top-0 z-10">
       <div className="max-w-5xl mx-auto px-4 sm:px-6">
         <div className="flex items-center gap-3 py-3 sm:py-4">
           <Link
-            href="/incorporacion"
+            href={homeHref}
             className="flex items-center gap-3 min-w-0 flex-1 group"
           >
             <Image
@@ -58,16 +64,16 @@ export function PublicHeader({ activa, badge }: Props) {
           aria-label="Navegación principal"
           className="flex items-center gap-1 -mb-px"
         >
-          <NavTab
-            href="/incorporacion"
-            label="Incorporación"
-            active={activa === "incorporacion"}
-          />
-          <NavTab
-            href="/validar"
-            label="Validar socio"
-            active={activa === "validar"}
-          />
+          {activa === "incorporacion" && (
+            <NavTab
+              href="/incorporacion"
+              label="Incorporación"
+              active={true}
+            />
+          )}
+          {activa === "validar" && (
+            <NavTab href="/validar" label="Validar socio" active={true} />
+          )}
           <a
             href="#ayuda"
             className="ml-auto h-11 px-3 inline-flex items-center text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors"
