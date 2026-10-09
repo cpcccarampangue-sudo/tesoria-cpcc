@@ -107,8 +107,7 @@ export default async function SocioPublicoPage({
           )}
           <p className="text-sm text-amber-900">{motivoFueraVentana}</p>
           <p className="text-xs text-slate-600 pt-2 border-t border-amber-200">
-            Para renovar, contacta a la directiva del Centro de Padres o
-            visita <strong>/incorporacion</strong>.
+            Para renovar, contacta a la directiva del Centro de Padres.
           </p>
         </div>
       </PaginaBase>
