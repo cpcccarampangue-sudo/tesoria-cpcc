@@ -140,6 +140,10 @@ function mockAdmin(initial: {
         return new Map<string | number, Record<string, unknown>>([
           [1, cfg as unknown as Record<string, unknown>],
         ]);
+      // contactos: no modelado en estos tests → devuelve mapa vacio
+      // (el saludo cae a "Hola," neutro, suficiente para los asserts).
+      if (tableName === "contactos")
+        return new Map<string | number, Record<string, unknown>>();
       throw new Error("tabla no soportada: " + tableName);
     }
 
@@ -209,6 +213,17 @@ function mockAdmin(initial: {
       },
       in(col: string, vals: unknown[]) {
         filters.push((f) => vals.includes(f[col]));
+        return b;
+      },
+      ilike(col: string, val: string) {
+        const needle = val.toLowerCase();
+        filters.push((f) => {
+          const v = f[col];
+          return typeof v === "string" && v.toLowerCase() === needle;
+        });
+        return b;
+      },
+      limit(_n: number) {
         return b;
       },
       async maybeSingle() {

@@ -415,12 +415,17 @@ export async function previewCorreoSocio(
   };
 
   const { armarCorreoSocioHtml } = await import("@/lib/email/socio-template");
+  // Preview visual en iframe sandbox: data URL funciona bien aqui porque
+  // no pasa por SMTP (en SMTP real se usa cid, ver enviar-qr.ts).
+  // saludoNombre "Juan" es el primer nombre ficticio para que el preview
+  // muestre "Hola Juan," en el saludo.
   return armarCorreoSocioHtml({
     solicitud: fakeSolicitud,
-    qrDataUrl,
+    qrSrc: qrDataUrl,
     qrTokenPublico: fakeSolicitud.qr_token,
     tipo,
     config: configConOverrides,
+    saludoNombre: "Juan",
   });
 }
 

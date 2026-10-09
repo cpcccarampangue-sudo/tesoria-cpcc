@@ -79,6 +79,11 @@ export type EnviarCorreoInput = {
   attachments?: Array<{
     filename: string;
     content: Buffer;
+    // Si viene cid, el adjunto se marca inline con ese Content-ID y
+    // puede referenciarse en el HTML como <img src="cid:xxx">. Gmail
+    // soporta esto nativamente y es la forma estable de embeber QRs
+    // (los data URLs grandes se rompen en Gmail web).
+    cid?: string;
   }>;
 };
 
@@ -96,6 +101,7 @@ export async function enviarCorreo(input: EnviarCorreoInput): Promise<void> {
             attachments: input.attachments.map((a) => ({
               filename: a.filename,
               content: a.content,
+              ...(a.cid ? { cid: a.cid } : {}),
             })),
           }
         : {}),

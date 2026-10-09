@@ -19,18 +19,25 @@ export type TipoCorreoSocio = "bienvenida" | "renovacion";
 
 type Args = {
   solicitud: SocioSolicitud;
-  qrDataUrl: string;
+  // qrSrc preferido (puede ser "cid:qr-socio" o un data URL). Si no
+  // viene, cae al qrDataUrl (compat). En correos reales SMTP se usa cid;
+  // en el preview admin se usa data URL (iframe sandbox).
+  qrSrc?: string;
+  qrDataUrl?: string;
   qrTokenPublico: string;
   tipo: TipoCorreoSocio;
   // Config para leer links sociales + textos editables. Opcional por
   // compat con callers viejos (si no se pasa, se usa fallback env + defaults).
   config?: SocioConfig | null;
+  // Nombre a usar en el saludo "Hola <nombre>,". Si null/vacio, se usa
+  // "Hola,". Normalmente el primer nombre del contacto que paga.
+  saludoNombre?: string | null;
 };
 
 // Textos default (fallback si DB no tiene override).
 const DEFAULTS = {
   bienvenida: {
-    asunto: "¡Bienvenidos como socios CPCC {{periodo}}! 💙",
+    asunto: "Bienvenido, ya eres parte del CPCC 💙💛",
     cuerpo:
       "Hola {{nombre}},\n\n" +
       "¡Bienvenidos al Centro de Padres del Colegio Carampangue!\n\n" +
@@ -61,10 +68,11 @@ export function armarCorreoSocioHtml(
   qrTokenPublicoLegacy?: string
 ): { subject: string; html: string } {
   // Compat: callers viejos pasan (solicitud, qrDataUrl, qrTokenPublico?).
-  // Callers nuevos pasan ({ solicitud, qrDataUrl, qrTokenPublico, tipo, config? }).
+  // Callers nuevos pasan ({ solicitud, qrSrc|qrDataUrl, qrTokenPublico, tipo, config?, saludoNombre? }).
   const args: Args =
-    "qrDataUrl" in (solicitudOrArgs as object) &&
-    (solicitudOrArgs as Args).qrDataUrl
+    typeof solicitudOrArgs === "object" &&
+    solicitudOrArgs !== null &&
+    ("qrSrc" in solicitudOrArgs || "qrDataUrl" in solicitudOrArgs)
       ? (solicitudOrArgs as Args)
       : {
           solicitud: solicitudOrArgs as SocioSolicitud,
@@ -74,13 +82,20 @@ export function armarCorreoSocioHtml(
           tipo: "bienvenida",
         };
 
-  const { solicitud, qrDataUrl, qrTokenPublico, tipo, config } = args;
+  const { solicitud, qrTokenPublico, tipo, config, saludoNombre } = args;
+  const qrSrc = args.qrSrc ?? args.qrDataUrl ?? "";
   const url = urlPublicaSocio(qrTokenPublico);
   const base = siteUrl();
   const anio = solicitud.periodo_anio;
 
+  // Saludo: usar primer nombre si vino en args.saludoNombre. Si no,
+  // dejar vacio para que el post-process convierta "Hola ," en "Hola,".
+  // NO usamos solicitud.apoderado_nombre porque suele ser el string de
+  // apellidos familiares ("Caceres Rodriguez"), que suena raro como saludo.
+  const nombreSaludo = (saludoNombre ?? "").trim();
+
   const vars: Record<string, string> = {
-    nombre: solicitud.apoderado_nombre,
+    nombre: nombreSaludo,
     periodo: String(anio),
     monto: `$${solicitud.monto_cuota.toLocaleString("es-CL")}`,
   };
@@ -98,7 +113,14 @@ export function armarCorreoSocioHtml(
     tipo === "renovacion" ? DEFAULTS.renovacion.cierre : DEFAULTS.bienvenida.cierre;
 
   const subject = aplicarPlaceholders(asuntoTpl, vars);
-  const cuerpoHtml = cuerpoATextoHtml(aplicarPlaceholders(cuerpoTpl, vars));
+  // Si no hay nombre resuelto, limpiar "Hola <espacios>," -> "Hola,".
+  // Si placeholder {{nombre}} no estaba precedido de "Hola ", el no-op
+  // igual es inofensivo.
+  let cuerpoRaw = aplicarPlaceholders(cuerpoTpl, vars);
+  if (!nombreSaludo) {
+    cuerpoRaw = cuerpoRaw.replace(/\bHola[ \t]+,/g, "Hola,");
+  }
+  const cuerpoHtml = cuerpoATextoHtml(cuerpoRaw);
 
   const botonesHtml = renderBotonesSociales(config);
 
@@ -125,7 +147,7 @@ export function armarCorreoSocioHtml(
 
         <tr><td style="padding:16px 24px;text-align:center;">
           <div style="display:inline-block;padding:16px;background:#f1f5f9;border-radius:8px;">
-            <img src="${qrDataUrl}" alt="Código QR de socio" width="240" height="240" style="display:block;width:240px;height:240px;" />
+            <img src="${esc(qrSrc)}" alt="Código QR de socio CPCC" width="240" height="240" style="display:block;width:240px;height:240px;border:0;outline:none;" />
           </div>
           <div style="margin-top:8px;font-size:11px;color:#94a3b8;">
             También puedes acceder desde: <a href="${esc(url)}" style="color:#64748b;">${esc(url)}</a>
@@ -163,10 +185,6 @@ export function armarCorreoSocioHtml(
         </td></tr>
 
         <tr><td style="padding:16px 24px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;">
-          <p style="margin:0 0 8px;font-size:12px;color:#64748b;line-height:1.5;">
-            Si perdiste tu QR o necesitas una copia, contacta a la
-            tesorería del Centro de Padres y te lo reenviaremos.
-          </p>
           <p style="margin:0;font-size:11px;color:#94a3b8;line-height:1.5;">
             Este correo se envió automáticamente. Por favor no respondas
             directamente a este mensaje. · <a href="${esc(base)}" style="color:#94a3b8;">${esc(base)}</a>

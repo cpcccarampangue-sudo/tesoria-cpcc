@@ -16,7 +16,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enviarCorreo } from "@/lib/email/mailer";
 import { armarCorreoSocioHtml } from "@/lib/email/socio-template";
-import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
+import { generarQrBuffer, urlPublicaSocio } from "@/lib/qr";
 import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
 import { determinarTipoCorreo } from "@/lib/socios/tipo-correo";
 import type { SocioConfig, SocioSolicitud } from "@/lib/types";
@@ -25,6 +25,58 @@ export type ResultadoEnvioQr =
   | { ok: true; enviado: true; via: "reenvio_manual" | "idempotente" }
   | { ok: true; enviado: false; motivo: "ya_enviado" | "busy_otro_proceso" }
   | { ok: false; error: string };
+
+// Content-ID del QR adjunto inline. Gmail renderiza <img src="cid:..."/>
+// cuando el adjunto viene con este Content-ID.
+const QR_CID = "qr-socio";
+
+function primerNombreDe(nombreCompleto: string | null | undefined): string | null {
+  if (!nombreCompleto) return null;
+  const t = nombreCompleto.trim();
+  if (!t) return null;
+  return t.split(/\s+/)[0] ?? null;
+}
+
+// Resuelve el primer nombre del contacto que paga para usarlo en el
+// saludo "Hola <nombre>,". Preferencia:
+//   1) contactos.nombre WHERE apoderado_id = X AND lower(email) = lower(E)
+//   2) cualquier contacto activo del apoderado (fallback)
+//   3) null -> saludo neutro "Hola,"
+//
+// NOTA: socio_solicitudes.apoderado_nombre suele ser el string de
+// APELLIDOS familiares ("Caceres Rodriguez"), no un nombre de persona.
+// Por eso NO lo usamos para el saludo.
+async function resolverSaludoNombre(
+  admin: SupabaseClient,
+  apoderadoId: string | null,
+  apoderadoEmail: string | null
+): Promise<string | null> {
+  if (!apoderadoId) return null;
+
+  if (apoderadoEmail) {
+    const { data } = await admin
+      .from("contactos")
+      .select("nombre")
+      .eq("apoderado_id", apoderadoId)
+      .ilike("email", apoderadoEmail)
+      .eq("activo", true)
+      .limit(1)
+      .maybeSingle();
+    const row = data as { nombre: string | null } | null;
+    const n = primerNombreDe(row?.nombre);
+    if (n) return n;
+  }
+
+  const { data: fallback } = await admin
+    .from("contactos")
+    .select("nombre")
+    .eq("apoderado_id", apoderadoId)
+    .eq("activo", true)
+    .limit(1)
+    .maybeSingle();
+  const row = fallback as { nombre: string | null } | null;
+  return primerNombreDe(row?.nombre);
+}
 
 // Compat: tira en error (callers viejos como registrarReenvioEmail usan
 // try/catch). Reenvio manual, no idempotente.
@@ -85,19 +137,38 @@ export async function enviarCorreoQrSocioIdempotente(
       qrTokenPublico = s.qr_token;
     }
     const url = urlPublicaSocio(qrTokenPublico);
-    const qrDataUrl = await generarQrDataUrl(url, { size: 400 });
+    // QR como PNG Buffer para adjuntarlo inline via Content-ID.
+    // Los data URLs grandes se rompen en Gmail web; cid funciona.
+    const qrBuffer = await generarQrBuffer(url, { size: 400 });
     const tipo =
       s.tipo_correo ??
       (await determinarTipoCorreo(admin, s.apoderado_id, s.periodo_anio, s.id));
+    const saludoNombre = await resolverSaludoNombre(
+      admin,
+      s.apoderado_id,
+      s.apoderado_email
+    );
     const { subject, html } = armarCorreoSocioHtml({
       solicitud: s,
-      qrDataUrl,
+      qrSrc: `cid:${QR_CID}`,
       qrTokenPublico,
       tipo,
       config,
+      saludoNombre,
     });
 
-    await enviarCorreo({ to: s.apoderado_email, subject, html });
+    await enviarCorreo({
+      to: s.apoderado_email,
+      subject,
+      html,
+      attachments: [
+        {
+          filename: "qr-socio-cpcc.png",
+          content: qrBuffer,
+          cid: QR_CID,
+        },
+      ],
+    });
 
     const { error: updErr } = await admin
       .from("socio_solicitudes")
@@ -147,19 +218,36 @@ async function enviarForzado(solicitudId: string): Promise<void> {
     qrTokenPublico = s.qr_token;
   }
   const url = urlPublicaSocio(qrTokenPublico);
-  const qrDataUrl = await generarQrDataUrl(url, { size: 400 });
+  const qrBuffer = await generarQrBuffer(url, { size: 400 });
   const tipo =
     s.tipo_correo ??
     (await determinarTipoCorreo(supabase, s.apoderado_id, s.periodo_anio, s.id));
+  const saludoNombre = await resolverSaludoNombre(
+    supabase,
+    s.apoderado_id,
+    s.apoderado_email
+  );
   const { subject, html } = armarCorreoSocioHtml({
     solicitud: s,
-    qrDataUrl,
+    qrSrc: `cid:${QR_CID}`,
     qrTokenPublico,
     tipo,
     config,
+    saludoNombre,
   });
 
-  await enviarCorreo({ to: s.apoderado_email, subject, html });
+  await enviarCorreo({
+    to: s.apoderado_email,
+    subject,
+    html,
+    attachments: [
+      {
+        filename: "qr-socio-cpcc.png",
+        content: qrBuffer,
+        cid: QR_CID,
+      },
+    ],
+  });
 
   const { error: updErr } = await supabase
     .from("socio_solicitudes")
