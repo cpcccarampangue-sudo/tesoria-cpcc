@@ -161,8 +161,8 @@ export function armarCorreoSocioHtml(
               <td style="padding:8px 0;font-weight:500;border-bottom:1px solid #e2e8f0;">${esc(solicitud.apoderado_nombre)}</td>
             </tr>
             <tr>
-              <td style="padding:8px 0;color:#64748b;border-bottom:1px solid #e2e8f0;">Alumno</td>
-              <td style="padding:8px 0;font-weight:500;border-bottom:1px solid #e2e8f0;">${esc(solicitud.alumno_nombre)}</td>
+              <td style="padding:8px 0;color:#64748b;border-bottom:1px solid #e2e8f0;vertical-align:top;">Alumno</td>
+              <td style="padding:8px 0;font-weight:500;border-bottom:1px solid #e2e8f0;">${renderAlumnos(solicitud.alumno_nombre)}</td>
             </tr>
             <tr>
               <td style="padding:8px 0;color:#64748b;border-bottom:1px solid #e2e8f0;">Curso</td>
@@ -243,6 +243,22 @@ function renderBotonesSociales(cfg?: SocioConfig | null): string {
 
 function botonHtml(href: string, label: string, bg: string): string {
   return `<a href="${esc(href)}" style="display:inline-block;padding:10px 16px;background:${bg};color:#ffffff;text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`;
+}
+
+// Renderiza el campo "Alumno" de la tabla de datos. Si el string viene
+// con varios nombres separados por coma (ej. hermanos registrados en la
+// misma solicitud), los pone uno debajo del otro usando <br/> (lo mas
+// compatible con Gmail/Outlook/Apple Mail). Si viene un solo nombre, se
+// renderiza igual que antes.
+function renderAlumnos(valor: string | null | undefined): string {
+  const txt = (valor ?? "").trim();
+  if (!txt) return "";
+  const nombres = txt
+    .split(/\s*,\s*/)
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+  if (nombres.length <= 1) return esc(txt);
+  return nombres.map(esc).join("<br/>");
 }
 
 function esc(s: string): string {
