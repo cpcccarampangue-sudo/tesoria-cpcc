@@ -991,22 +991,68 @@ export async function anularSolicitud(id: string) {
   revalidatePath("/cuentas");
 }
 
-// Genera el QR del socio y lo envia por correo via Resend. Actualiza
-// estado a "enviada" y, si es un reenvio, incrementa el contador. Se usa
-// desde el panel admin para "enviar QR" o "reenviar QR".
-// Devuelve un objeto result en vez de throw para que el error no quede
-// oculto por el runtime de Next.js en produccion ("Server Components
-// render"). El cliente lee result.ok y si es false muestra el mensaje.
+// Validacion server-side de un email para uso puntual como destinatario.
+// NO permite:
+//   - vacio o solo whitespace
+//   - varios destinatarios (coma, punto y coma, espacio dentro)
+//   - headers injection (\r, \n, \0, caracteres de control)
+//   - formato basico invalido
+// Normaliza: trim + lowercase. Devuelve el valor limpio o lanza.
+function validarEmailDestino(raw: string): string {
+  const e = raw.trim().toLowerCase();
+  if (!e) throw new Error("El correo no puede estar vacio.");
+  if (e.length > 254) throw new Error("Correo demasiado largo.");
+  // No permitir separadores de multi-destinatario ni caracteres de control.
+  if (/[\r\n\0\t ,;]/.test(e)) {
+    throw new Error("El correo contiene caracteres no permitidos.");
+  }
+  // Formato basico: local@dominio.tld
+  // Local admite letras/numeros + . _ % + -
+  // Dominio admite letras/numeros + puntos + guiones, TLD >=2.
+  const ok = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e);
+  if (!ok) throw new Error("Formato de correo invalido.");
+  return e;
+}
+
+function maskEmail(e: string): string {
+  const at = e.indexOf("@");
+  if (at < 1) return "***";
+  const user = e.slice(0, at);
+  const dom = e.slice(at + 1);
+  const userMask = user.length <= 2 ? user[0] + "***" : user[0] + "***";
+  return `${userMask}@${dom}`;
+}
+
+// Genera el QR del socio y lo envia por correo. Actualiza estado a
+// "enviada" y, si es un reenvio, incrementa el contador. Se usa desde el
+// panel admin para "enviar QR" o "reenviar QR".
+//
+// opts.emailDestino (opcional): si viene, el SMTP envia a ese correo en
+// vez de solicitud.apoderado_email. NO se persiste en apoderados ni en
+// contactos; es solo para ese envio puntual. Se valida en servidor.
+//
+// Devuelve result (no throw) + destinatario enmascarado para feedback UI.
 export async function registrarReenvioEmail(
-  id: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  id: string,
+  opts: { emailDestino?: string | null } = {}
+): Promise<
+  | { ok: true; destinatario_mask: string }
+  | { ok: false; error: string }
+> {
   await requireDirectiva();
   try {
-    await enviarCorreoQrSocio(id);
+    let emailFinal: string | null = null;
+    if (opts.emailDestino != null && opts.emailDestino !== "") {
+      emailFinal = validarEmailDestino(opts.emailDestino);
+    }
+    await enviarCorreoQrSocio(id, { emailDestino: emailFinal });
     revalidatePath("/socios");
     revalidatePath(`/socios/${id}`);
     revalidatePath("/apoderados");
-    return { ok: true };
+    // Si usa override, enmascaramos ese. Si no, para UX decimos
+    // "correo registrado" sin exponer email completo en logs/UI.
+    const destinatario_mask = emailFinal ? maskEmail(emailFinal) : "correo registrado";
+    return { ok: true, destinatario_mask };
   } catch (err) {
     const mensaje =
       err instanceof Error ? err.message : "Error desconocido al enviar el correo.";

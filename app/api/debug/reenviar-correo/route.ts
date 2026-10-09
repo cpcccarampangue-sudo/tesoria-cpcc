@@ -47,11 +47,19 @@ export async function POST(req: NextRequest) {
     } catch {
       body = {};
     }
-    const b = body as { solicitud_id?: string; checkout_id?: string };
+    const b = body as {
+      solicitud_id?: string;
+      checkout_id?: string;
+      email_destino?: string;
+    };
     const solicitudIdParam =
       typeof b.solicitud_id === "string" ? b.solicitud_id : null;
     const checkoutIdParam =
       typeof b.checkout_id === "string" ? b.checkout_id : null;
+    const emailDestinoRaw =
+      typeof b.email_destino === "string" && b.email_destino.trim() !== ""
+        ? b.email_destino
+        : null;
     if (!solicitudIdParam && !checkoutIdParam) {
       return NextResponse.json(
         {
@@ -60,6 +68,30 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 }
       );
+    }
+    // Validacion server-side del email alternativo si viene.
+    let emailDestinoLimpio: string | null = null;
+    if (emailDestinoRaw != null) {
+      const e = emailDestinoRaw.trim().toLowerCase();
+      if (!e || e.length > 254) {
+        return NextResponse.json(
+          { ok: false, error: "email_destino vacio o demasiado largo" },
+          { status: 400 }
+        );
+      }
+      if (/[\r\n\0\t ,;]/.test(e)) {
+        return NextResponse.json(
+          { ok: false, error: "email_destino contiene caracteres no permitidos" },
+          { status: 400 }
+        );
+      }
+      if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e)) {
+        return NextResponse.json(
+          { ok: false, error: "email_destino formato invalido" },
+          { status: 400 }
+        );
+      }
+      emailDestinoLimpio = e;
     }
 
     const admin = createSupabaseAdminClient();
@@ -93,11 +125,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Reenvio compat (siempre envia). NO toca SumUp.
-    const r = await enviarCorreoQrSocio(sol.id);
+    const r = await enviarCorreoQrSocio(sol.id, {
+      emailDestino: emailDestinoLimpio,
+    });
+    const destinatarioFinal = emailDestinoLimpio ?? sol.apoderado_email;
     return NextResponse.json({
       ok: true,
       enviado: true,
-      destinatario_mask: maskEmail(sol.apoderado_email),
+      destinatario_mask: maskEmail(destinatarioFinal),
+      uso_email_alternativo: emailDestinoLimpio !== null,
       detalle: r,
       efectos: [
         "UPDATE socio_solicitudes.email_enviado_en = NOW()",

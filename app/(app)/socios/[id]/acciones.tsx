@@ -6,10 +6,10 @@ import {
   marcarSolicitudEnviada,
   rechazarSolicitud,
   anularSolicitud,
-  registrarReenvioEmail,
 } from "../actions";
 import { VincularFamilia } from "./vincular-familia";
 import { PagoManualDialog, type CuentaOp } from "./pago-manual";
+import { ReenviarCorreoDialog } from "./reenviar-modal";
 
 export function AccionesSolicitud({
   solicitud: s,
@@ -31,27 +31,6 @@ export function AccionesSolicitud({
       try {
         await fn();
         setSuccess("Acción completada.");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Error.");
-      }
-    });
-  }
-
-  // Variante para acciones que devuelven { ok, error } en vez de throw.
-  // Usa esto cuando el error puede ser oscurecido por el runtime de Next.
-  function runWithResult(
-    fn: () => Promise<{ ok: true } | { ok: false; error: string }>
-  ) {
-    setError(null);
-    setSuccess(null);
-    startTransition(async () => {
-      try {
-        const res = await fn();
-        if (res.ok) {
-          setSuccess("Acción completada.");
-        } else {
-          setError(res.error);
-        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Error.");
       }
@@ -98,13 +77,12 @@ export function AccionesSolicitud({
 
       {s.estado === "pagada" && (
         <div className="flex flex-wrap gap-2">
-          <button
-            className="btn-primary"
-            disabled={pending}
-            onClick={() => runWithResult(() => registrarReenvioEmail(s.id))}
-          >
-            📧 Enviar QR por correo
-          </button>
+          <ReenviarCorreoDialog
+            solicitudId={s.id}
+            correoRegistrado={s.apoderado_email}
+            label="Enviar QR por correo"
+            icon="📧"
+          />
           <button
             className="btn-secondary"
             disabled={pending}
@@ -120,13 +98,12 @@ export function AccionesSolicitud({
 
       {s.estado === "enviada" && (
         <div className="flex flex-wrap gap-2">
-          <button
-            className="btn-primary"
-            disabled={pending}
-            onClick={() => runWithResult(() => registrarReenvioEmail(s.id))}
-          >
-            🔁 Reenviar QR
-          </button>
+          <ReenviarCorreoDialog
+            solicitudId={s.id}
+            correoRegistrado={s.apoderado_email}
+            label="Reenviar QR"
+            icon="🔁"
+          />
           <p className="text-xs text-slate-500 w-full">
             Si el apoderado reporta que no recibió el correo o lo perdió,
             puedes reenviarlo. Reenvíos:{" "}

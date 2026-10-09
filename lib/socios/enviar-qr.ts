@@ -80,18 +80,21 @@ async function resolverSaludoNombre(
 
 // Compat: tira en error (callers viejos como registrarReenvioEmail usan
 // try/catch). Reenvio manual, no idempotente.
+//
+// opts.emailDestino: opcional. Si viene, SMTP envia a ese correo en vez
+// de solicitud.apoderado_email. NO persiste en apoderados ni contactos:
+// se usa solo como destinatario puntual para ese envio.
 export async function enviarCorreoQrSocio(
   solicitudId: string,
-  opts: { soloSiNoEnviado?: boolean } = {}
+  opts: { soloSiNoEnviado?: boolean; emailDestino?: string | null } = {}
 ): Promise<ResultadoEnvioQr> {
   const soloSiNoEnviado = opts.soloSiNoEnviado === true;
   if (soloSiNoEnviado) {
-    // Legacy: construye admin internamente. Nuevas rutas deben llamar
-    // enviarCorreoQrSocioIdempotente(admin, ...) directamente.
+    // Flujo idempotente (webhook/reconciliacion) NO soporta override.
     const admin = createSupabaseAdminClient();
     return await enviarCorreoQrSocioIdempotente(admin, solicitudId);
   }
-  await enviarForzado(solicitudId);
+  await enviarForzado(solicitudId, opts.emailDestino ?? null);
   return { ok: true, enviado: true, via: "reenvio_manual" };
 }
 
@@ -200,7 +203,11 @@ export async function enviarCorreoQrSocioIdempotente(
 
 // Flujo compat / reenvio manual. SIEMPRE envia. Incrementa email_reenvios
 // si ya habia enviado antes. Usa supabase cliente server (requiere cookies).
-async function enviarForzado(solicitudId: string): Promise<void> {
+// emailDestinoOverride: si viene, SMTP envia a ese correo (no persiste).
+async function enviarForzado(
+  solicitudId: string,
+  emailDestinoOverride: string | null
+): Promise<void> {
   const supabase = await createSupabaseServerClient();
   const [{ data: solData, error: solErr }, { data: cfgData }] = await Promise.all([
     supabase.from("socio_solicitudes").select("*").eq("id", solicitudId).maybeSingle(),
@@ -236,8 +243,9 @@ async function enviarForzado(solicitudId: string): Promise<void> {
     saludoNombre,
   });
 
+  const destinatario = emailDestinoOverride ?? s.apoderado_email;
   await enviarCorreo({
-    to: s.apoderado_email,
+    to: destinatario,
     subject,
     html,
     attachments: [
