@@ -3,6 +3,21 @@
 import { useState } from "react";
 import type { ContactoInput } from "@/app/(app)/apoderados/actions";
 import { RELACION_LABELS, type ContactoRelacion } from "@/lib/types";
+import { TelefonoCLInput } from "@/components/telefono-cl-input";
+import { normalizarTelefonoCL } from "@/lib/normalizar";
+
+// Convierte el telefono tal como vive en la DB (puede ser canonico
+// "+56XXXXXXXXX", 9 digitos sueltos, o un string historico cualquiera)
+// a los 9 digitos que necesita el input (sin prefijo). Si no se puede
+// deducir, deja el texto crudo para que la directiva lo vea y decida.
+function telefonoAInputDigitos(crudo: string | null): string {
+  if (!crudo) return "";
+  const n = normalizarTelefonoCL(crudo);
+  if (n) return n.replace(/^\+56/, "");
+  // No reconocible como celular CL: devolvemos solo digitos para que la
+  // directiva vea lo mas cercano. El componente limita a 9 digitos.
+  return crudo.replace(/\D/g, "").slice(0, 9);
+}
 
 type Item = ContactoInput & { _key: string };
 
@@ -135,7 +150,7 @@ export function ContactosEditor({
               placeholder="RUT (ej. 12.345.678-9)"
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-start">
             <input
               className="input"
               type="email"
@@ -143,11 +158,16 @@ export function ContactosEditor({
               onChange={(e) => update(i, { email: e.target.value || null })}
               placeholder="Email"
             />
-            <input
-              className="input"
-              value={it.telefono ?? ""}
-              onChange={(e) => update(i, { telefono: e.target.value || null })}
-              placeholder="Teléfono"
+            <TelefonoCLInput
+              label={null}
+              required={false}
+              helper="Opcional. Si lo ingresas, deben ser 9 dígitos empezando con 9."
+              value={telefonoAInputDigitos(it.telefono)}
+              onChange={(digitos) =>
+                update(i, {
+                  telefono: digitos.length === 0 ? null : `+56${digitos}`,
+                })
+              }
             />
           </div>
         </div>

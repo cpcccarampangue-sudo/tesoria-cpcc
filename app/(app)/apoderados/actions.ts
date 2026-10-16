@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { ContactoRelacion } from "@/lib/types";
 import Papa from "papaparse";
+import { normalizarTelefonoCL } from "@/lib/normalizar";
 
 export type EstudianteInput = {
   id?: string;
@@ -63,17 +64,70 @@ function cleanRut(v: string | null | undefined): string | null {
   return `${conPuntos}-${dv}`;
 }
 
-function normalizarContactos(raw: ContactoInput[] | undefined) {
+// Normaliza un telefono para la DB. Devuelve:
+//   null       — campo vacio (permitido; socios historicos sin telefono).
+//   +56XXXXX   — telefono valido ya canonico.
+// Lanza con mensaje humano si el valor no esta vacio pero no es un
+// celular chileno valido. El llamador decide si incluir el nombre del
+// contacto en el error (lo hace normalizarContactos).
+function limpiarTelefonoOpcional(crudo: string | null | undefined): string | null {
+  if (crudo === null || crudo === undefined) return null;
+  const trimmed = crudo.trim();
+  if (trimmed === "") return null;
+  const norm = normalizarTelefonoCL(trimmed);
+  if (!norm) {
+    throw new Error(
+      "Teléfono inválido: ingresa 9 dígitos empezando con 9 (ej. 955282630) o deja el campo vacío."
+    );
+  }
+  return norm;
+}
+
+// Normaliza contactos para persistir. Si se pasa `previos`, los
+// telefonos que NO cambiaron se dejan tal cual (preserva historicos
+// malformados sin bloquear la edicion de otros campos — requisito
+// explicito: no bloquear modificaciones por info historica faltante).
+// Para contactos nuevos (sin id) o teléfonos que si cambiaron, se
+// aplica validacion estricta: o vacio o canonico +56XXXXXXXXX.
+function normalizarContactos(
+  raw: ContactoInput[] | undefined,
+  previos?: Map<string, string | null>
+) {
   if (!raw) return [];
   return raw
-    .map((c) => ({
-      id: c.id,
-      nombre: c.nombre.trim(),
-      rut: cleanRut(c.rut),
-      email: cleanEmail(c.email),
-      telefono: c.telefono?.trim() || null,
-      relacion: c.relacion ?? "otro",
-    }))
+    .map((c) => {
+      const previo = c.id ? previos?.get(c.id) ?? null : null;
+      const propuesto = (c.telefono ?? "").trim();
+      // Si es contacto existente y el usuario NO cambio el telefono
+      // (contra el valor en DB), lo preservamos tal cual sin validar.
+      // Comparamos tras un trim para evitar diferencias por espacios.
+      const sinCambio =
+        c.id !== undefined &&
+        ((previo ?? "") === propuesto || (previo ?? "") === (c.telefono ?? ""));
+      let telefono: string | null;
+      if (sinCambio) {
+        telefono = previo;
+      } else {
+        try {
+          telefono = limpiarTelefonoOpcional(c.telefono);
+        } catch (err) {
+          const base =
+            err instanceof Error ? err.message : "Teléfono inválido.";
+          const nombre = c.nombre?.trim();
+          throw new Error(
+            nombre ? `${base} (contacto: ${nombre})` : base
+          );
+        }
+      }
+      return {
+        id: c.id,
+        nombre: c.nombre.trim(),
+        rut: cleanRut(c.rut),
+        email: cleanEmail(c.email),
+        telefono,
+        relacion: c.relacion ?? "otro",
+      };
+    })
     .filter((c) => c.nombre.length > 0);
 }
 
@@ -171,7 +225,21 @@ export async function actualizarApoderado(id: string, input: ApoderadoInput) {
     .eq("id", id);
   if (error) throw new Error(error.message);
 
-  const contactos = normalizarContactos(input.contactos);
+  // Leemos los telefonos previos para que normalizarContactos pueda
+  // preservar historicos malformados cuando el usuario NO los esta
+  // tocando. Esto evita bloquear la edicion de otros campos.
+  const { data: contactosDb } = await supabase
+    .from("contactos")
+    .select("id, telefono")
+    .eq("apoderado_id", id);
+  const previos = new Map<string, string | null>();
+  for (const c of (contactosDb as
+    | { id: string; telefono: string | null }[]
+    | null) ?? []) {
+    previos.set(c.id, c.telefono);
+  }
+
+  const contactos = normalizarContactos(input.contactos, previos);
   await syncChildren(supabase, "contactos", id, contactos, (c) => ({
     nombre: c.nombre,
     rut: c.rut,
