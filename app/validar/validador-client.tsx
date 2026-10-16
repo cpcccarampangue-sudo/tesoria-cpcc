@@ -5,6 +5,7 @@ import type { Html5Qrcode } from "html5-qrcode";
 import {
   buscarFamiliaPorApellido,
   confirmarIdentidadYValidar,
+  confirmarIdentidadPorEmail,
   type FamiliaResumen,
 } from "./actions";
 
@@ -56,6 +57,9 @@ export function ValidadorClient() {
     null
   );
   const [pin, setPin] = useState("");
+  const [emailConfirmacion, setEmailConfirmacion] = useState("");
+  // Metodo elegido para confirmar identidad en el flujo apellido.
+  const [factor, setFactor] = useState<"telefono" | "email">("telefono");
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const containerId = "qr-reader-container";
@@ -175,7 +179,11 @@ export function ValidadorClient() {
   function elegirFamilia(f: FamiliaResumen) {
     setFamiliaElegida(f);
     setPin("");
+    setEmailConfirmacion("");
     setError(null);
+    // Seleccion por defecto: si la familia tiene telefono, usamos ese
+    // factor (comportamiento historico). Si no, caemos al email.
+    setFactor(f.puedeConfirmarPorTelefono ? "telefono" : "email");
     setModo("apellido_confirmar");
   }
 
@@ -185,13 +193,21 @@ export function ValidadorClient() {
     setError(null);
     setCargando(true);
     try {
-      const r = await confirmarIdentidadYValidar(
-        familiaElegida.apoderadoId,
-        pin
-      );
+      const r =
+        factor === "telefono"
+          ? await confirmarIdentidadYValidar(
+              familiaElegida.apoderadoId,
+              pin
+            )
+          : await confirmarIdentidadPorEmail(
+              familiaElegida.apoderadoId,
+              emailConfirmacion
+            );
       if (!r.ok) {
         if (r.motivo === "digitos_invalidos") {
           setError("Ingresa 4 dígitos.");
+        } else if (r.motivo === "email_invalido") {
+          setError("Ingresa un correo electrónico válido.");
         } else {
           setError(
             "Esta familia no tiene un dato de confirmación registrado. Pide el QR al socio o contacta a la directiva."
@@ -230,6 +246,7 @@ export function ValidadorClient() {
       }
       setModo("inicial");
       setPin("");
+      setEmailConfirmacion("");
       setFamiliaElegida(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error.");
@@ -247,6 +264,8 @@ export function ValidadorClient() {
     setResultadosApellido([]);
     setFamiliaElegida(null);
     setPin("");
+    setEmailConfirmacion("");
+    setFactor("telefono");
   }
 
   // === RENDER ===
@@ -428,11 +447,12 @@ export function ValidadorClient() {
                   <span className="font-medium text-slate-900 truncate">
                     {f.nombreMask}
                   </span>
-                  {!f.puedeConfirmar && (
-                    <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 flex-shrink-0">
-                      sin dato
-                    </span>
-                  )}
+                  {!f.puedeConfirmarPorTelefono &&
+                    !f.puedeConfirmarPorEmail && (
+                      <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 flex-shrink-0">
+                        sin dato
+                      </span>
+                    )}
                 </button>
               </li>
             ))}
@@ -457,8 +477,16 @@ export function ValidadorClient() {
     );
   }
 
-  // Vista buscar por apellido - paso 3 (pedir PIN)
+  // Vista buscar por apellido - paso 3 (pedir factor: telefono o email)
   if (modo === "apellido_confirmar" && familiaElegida) {
+    const sinDato =
+      !familiaElegida.puedeConfirmarPorTelefono &&
+      !familiaElegida.puedeConfirmarPorEmail;
+    const factorValido =
+      factor === "telefono"
+        ? pin.length === 4 && familiaElegida.puedeConfirmarPorTelefono
+        : /\S+@\S+\.\S+/.test(emailConfirmacion.trim()) &&
+          familiaElegida.puedeConfirmarPorEmail;
     return (
       <form onSubmit={enviarPin} className="space-y-4">
         <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm text-slate-700">
@@ -470,39 +498,115 @@ export function ValidadorClient() {
           </div>
         </div>
 
-        <div>
-          <label
-            htmlFor="pin"
-            className="block text-sm font-medium text-slate-700 mb-1.5"
+        {!sinDato && (
+          <div
+            role="radiogroup"
+            aria-label="Método de confirmación"
+            className="grid grid-cols-2 gap-2"
           >
-            Últimos 4 dígitos del teléfono registrado
-          </label>
-          <input
-            id="pin"
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="off"
-            maxLength={4}
-            required
-            value={pin}
-            onChange={(e) =>
-              setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-            }
-            placeholder="••••"
-            className="w-full h-[56px] px-4 rounded-xl border border-slate-300 bg-white text-xl text-slate-900 placeholder:text-slate-400 shadow-sm font-mono tracking-widest text-center focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
-          />
-          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-            Pide al socio los últimos 4 dígitos de su teléfono. No se los
-            mostramos.
-          </p>
-        </div>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={factor === "telefono"}
+              disabled={!familiaElegida.puedeConfirmarPorTelefono}
+              onClick={() => setFactor("telefono")}
+              className={
+                "h-11 px-3 rounded-xl text-sm font-medium transition-colors border " +
+                (factor === "telefono"
+                  ? "bg-brand-700 border-brand-700 text-white"
+                  : "bg-white border-slate-300 text-slate-700 hover:border-slate-400") +
+                (!familiaElegida.puedeConfirmarPorTelefono
+                  ? " opacity-50 cursor-not-allowed"
+                  : "")
+              }
+            >
+              Últimos 4 del teléfono
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={factor === "email"}
+              disabled={!familiaElegida.puedeConfirmarPorEmail}
+              onClick={() => setFactor("email")}
+              className={
+                "h-11 px-3 rounded-xl text-sm font-medium transition-colors border " +
+                (factor === "email"
+                  ? "bg-brand-700 border-brand-700 text-white"
+                  : "bg-white border-slate-300 text-slate-700 hover:border-slate-400") +
+                (!familiaElegida.puedeConfirmarPorEmail
+                  ? " opacity-50 cursor-not-allowed"
+                  : "")
+              }
+            >
+              Correo electrónico
+            </button>
+          </div>
+        )}
 
-        {!familiaElegida.puedeConfirmar && (
+        {factor === "telefono" && familiaElegida.puedeConfirmarPorTelefono && (
+          <div>
+            <label
+              htmlFor="pin"
+              className="block text-sm font-medium text-slate-700 mb-1.5"
+            >
+              Últimos 4 dígitos del teléfono registrado
+            </label>
+            <input
+              id="pin"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="off"
+              maxLength={4}
+              required
+              value={pin}
+              onChange={(e) =>
+                setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+              placeholder="••••"
+              className="w-full h-[56px] px-4 rounded-xl border border-slate-300 bg-white text-xl text-slate-900 placeholder:text-slate-400 shadow-sm font-mono tracking-widest text-center focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+            />
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Pide al socio los últimos 4 dígitos de su teléfono. No se los
+              mostramos.
+            </p>
+          </div>
+        )}
+
+        {factor === "email" && familiaElegida.puedeConfirmarPorEmail && (
+          <div>
+            <label
+              htmlFor="email-confirmar"
+              className="block text-sm font-medium text-slate-700 mb-1.5"
+            >
+              Correo electrónico registrado
+            </label>
+            <input
+              id="email-confirmar"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              required
+              value={emailConfirmacion}
+              onChange={(e) => setEmailConfirmacion(e.target.value)}
+              placeholder="correo@ejemplo.cl"
+              className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+            />
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Pide al socio el correo con el que se incorporó. Debe
+              coincidir con el registrado en el sistema.
+            </p>
+          </div>
+        )}
+
+        {sinDato && (
           <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
-            Esta familia no tiene teléfono registrado. No podrás validar
-            desde este formulario — pide el QR al socio o escribe a la
-            directiva.
+            Esta familia no tiene teléfono ni correo registrados. No podrás
+            validar desde este formulario — pide el QR al socio o escribe a
+            la directiva.
           </div>
         )}
 
@@ -525,9 +629,7 @@ export function ValidadorClient() {
           </button>
           <button
             type="submit"
-            disabled={
-              cargando || pin.length !== 4 || !familiaElegida.puedeConfirmar
-            }
+            disabled={cargando || sinDato || !factorValido}
             className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
           >
             {cargando ? "Confirmando…" : "Confirmar identidad"}

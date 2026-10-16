@@ -30,3 +30,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*
+
+# backups de operaciones sobre DB (contienen snapshots de datos)
+scripts/backups/

@@ -20,7 +20,7 @@ import type {
 } from "@/lib/types";
 import { todosLosCursos } from "@/lib/cursos";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
-import { normalizarEmail } from "@/lib/normalizar";
+import { normalizarEmail, normalizarTelefonoCL } from "@/lib/normalizar";
 import { precioVigente } from "@/lib/socios/precio";
 import { determinarTipoCorreo } from "@/lib/socios/tipo-correo";
 
@@ -208,7 +208,9 @@ export async function buscarFamilias(
 export type CrearSolicitudInput = {
   apoderado_id: string;
   apoderado_email: string;
-  apoderado_telefono?: string;
+  // Telefono celular chileno OBLIGATORIO en el flujo publico. El server
+  // revalida y rechaza si no cumple +56 + 9 digitos iniciando con 9.
+  apoderado_telefono: string;
   estudiante_ids: string[];
 };
 
@@ -226,6 +228,12 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   const email = normalizarEmail(input.apoderado_email);
   if (!email) {
     throw new Error("El correo electrónico no es válido.");
+  }
+  const telefonoNorm = normalizarTelefonoCL(input.apoderado_telefono);
+  if (!telefonoNorm) {
+    throw new Error(
+      "Ingresa un teléfono celular válido (9 dígitos empezando con 9)."
+    );
   }
   const sesionId = await requerirSesionOtp(email);
   if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
@@ -339,7 +347,7 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
       apoderado_id: input.apoderado_id,
       apoderado_nombre: apoderado.nombre,
       apoderado_email: email,
-      apoderado_telefono: input.apoderado_telefono?.trim() || null,
+      apoderado_telefono: telefonoNorm,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
       // Monto SIEMPRE del servidor, nunca del cliente.
@@ -355,6 +363,26 @@ export async function crearSolicitudSocio(input: CrearSolicitudInput) {
   }
 
   const solicitud = nueva as Pick<SocioSolicitud, "id" | "qr_token">;
+
+  // Propagar el telefono recien verificado al contacto cuyo email
+  // coincide con el verificado por OTP. Es seguro porque:
+  //   - El unique index `idx_contactos_email_unique` garantiza que
+  //     existe a lo mas un contacto con ese email.
+  //   - El usuario demostro control del correo con OTP, por lo que la
+  //     asociacion email<->telefono queda confirmada por evidencia.
+  //   - Si no existia telefono previo, se agrega sin perder datos.
+  //   - Si existia otro telefono, se actualiza (el flujo privilegia
+  //     el dato recien verificado por el titular del correo).
+  // Si el update no afecta filas (p.ej. el contacto esta inactivo),
+  // continuamos: la solicitud queda guardada igualmente con el
+  // telefono en socio_solicitudes y la directiva puede regularizar.
+  await supabase
+    .from("contactos")
+    .update({ telefono: telefonoNorm })
+    .eq("apoderado_id", input.apoderado_id)
+    .eq("activo", true)
+    .ilike("email", email);
+
   // Consumimos la sesion OTP: una verificacion de correo = una
   // incorporacion. Si quiere ingresar otra, OTP nuevo.
   await consumirSesion(sesionId);
@@ -374,7 +402,8 @@ export type CrearSolicitudManualInput = {
   apoderado_nombre: string;
   apoderado_email: string;
   apoderado_rut?: string;
-  apoderado_telefono?: string;
+  // OBLIGATORIO: igual que en el flujo B, el server revalida formato CL.
+  apoderado_telefono: string;
   hijos: HijoManual[];
 };
 
@@ -396,6 +425,12 @@ export async function crearSolicitudManualSocio(
   }
   if (!email) {
     throw new Error("El correo electrónico no es válido.");
+  }
+  const telefonoNormManual = normalizarTelefonoCL(input.apoderado_telefono);
+  if (!telefonoNormManual) {
+    throw new Error(
+      "Ingresa un teléfono celular válido (9 dígitos empezando con 9)."
+    );
   }
   // REQUIERE sesion OTP valida con mismo email: el correo manual DEBE
   // haber sido verificado antes de crear la solicitud.
@@ -479,7 +514,7 @@ export async function crearSolicitudManualSocio(
       apoderado_nombre: nombre,
       apoderado_email: email,
       apoderado_rut: input.apoderado_rut?.trim() || null,
-      apoderado_telefono: input.apoderado_telefono?.trim() || null,
+      apoderado_telefono: telefonoNormManual,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
       // Monto SIEMPRE del servidor.

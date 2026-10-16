@@ -8,6 +8,7 @@ import { precioVigente } from "@/lib/socios/precio";
 import { obtenerOGenerarQrFamilia } from "@/lib/socios/qr-familia";
 import { determinarTipoCorreo } from "@/lib/socios/tipo-correo";
 import { chileLocalToUtc } from "@/lib/tz-chile";
+import { normalizarEmail, normalizarTelefonoCL } from "@/lib/normalizar";
 
 // Valida y normaliza un Payment Link de SumUp. Debe ser https y dominio
 // pay.sumup.com. Vacio -> null. Lanza si invalido.
@@ -435,7 +436,8 @@ export async function previewCorreoSocio(
 export type CrearSocioManualInput = {
   apoderado_id: string;
   apoderado_email: string;
-  apoderado_telefono?: string;
+  // OBLIGATORIO: igual que el flujo publico, el server revalida formato CL.
+  apoderado_telefono: string;
   estudiante_ids: string[];
   cuenta_id: string;
   fecha: string; // YYYY-MM-DD
@@ -444,15 +446,20 @@ export type CrearSocioManualInput = {
   enviarQr?: boolean;
 };
 
-const EMAIL_RE_SIMPLE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export async function crearSocioConPagoManual(
   input: CrearSocioManualInput
 ): Promise<string> {
   const profile = await requireDirectiva();
-  const email = input.apoderado_email.trim().toLowerCase();
-  if (!EMAIL_RE_SIMPLE.test(email)) {
+  const emailNorm = normalizarEmail(input.apoderado_email);
+  if (!emailNorm) {
     throw new Error("El correo electrónico no es válido.");
+  }
+  const email = emailNorm;
+  const telefonoNormAdmin = normalizarTelefonoCL(input.apoderado_telefono);
+  if (!telefonoNormAdmin) {
+    throw new Error(
+      "Ingresa un teléfono celular válido (9 dígitos empezando con 9)."
+    );
   }
   if (!input.cuenta_id) throw new Error("Debes elegir una cuenta.");
   if (!input.estudiante_ids || input.estudiante_ids.length === 0) {
@@ -560,7 +567,7 @@ export async function crearSocioConPagoManual(
       apoderado_id: input.apoderado_id,
       apoderado_nombre: apoderado.nombre,
       apoderado_email: email,
-      apoderado_telefono: input.apoderado_telefono?.trim() || null,
+      apoderado_telefono: telefonoNormAdmin,
       alumno_nombre: alumnoRepr,
       curso: cursoRepr,
       monto_cuota: monto,
@@ -579,7 +586,19 @@ export async function crearSocioConPagoManual(
     );
   }
 
-  // 3. QR permanente por familia: asegurar apoderados.qr_token
+  // 3. Propagar telefono al contacto cuyo email coincide con el
+  //    confirmado por la tesoreria. Es best-effort: si no hay contacto
+  //    con ese email, la solicitud queda con el telefono en
+  //    socio_solicitudes.apoderado_telefono y la directiva puede
+  //    completar la ficha de contactos desde /apoderados.
+  await supabase
+    .from("contactos")
+    .update({ telefono: telefonoNormAdmin })
+    .eq("apoderado_id", input.apoderado_id)
+    .eq("activo", true)
+    .ilike("email", email);
+
+  // 4. QR permanente por familia: asegurar apoderados.qr_token
   //    (reutiliza si ya tenia, genera si no). Es el QR que ira al correo.
   try {
     await obtenerOGenerarQrFamilia(supabase, input.apoderado_id);

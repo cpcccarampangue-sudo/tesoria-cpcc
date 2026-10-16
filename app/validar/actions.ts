@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { requireValidador, type ValidadorContexto } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
-import { sinTildes, soloDigitos } from "@/lib/normalizar";
+import { sinTildes, soloDigitos, normalizarEmail } from "@/lib/normalizar";
 import { hmacAudit } from "@/lib/audit/hmac";
 import type { Apoderado, Contacto, SocioConfig } from "@/lib/types";
 
@@ -25,6 +25,11 @@ const RL_BUSCAR_MAX = 30;
 const RL_BUSCAR_WIN_MS = 10 * 60 * 1000; // 30/10min por usuario+IP
 const RL_CONFIRMAR_MAX = 15;
 const RL_CONFIRMAR_WIN_MS = 10 * 60 * 1000;
+// Rate limit mas estricto para la confirmacion por correo. El correo
+// es un espacio de busqueda mas grande (vs 4 digitos) pero igual
+// mantenemos un tope bajo para desincentivar barridos automatizados.
+const RL_CONFIRMAR_EMAIL_MAX = 10;
+const RL_CONFIRMAR_EMAIL_WIN_MS = 10 * 60 * 1000;
 
 async function rateLimitKey(sufijo: string, actorKey: string): Promise<string> {
   const h = await headers();
@@ -78,7 +83,10 @@ function actorFields(ctx: ValidadorContexto): LogActorFields {
 
 type RegistrarLogInput = {
   ctx: ValidadorContexto;
-  metodo: "qr" | "manual" | "apellido";
+  // 'email' se agrega en migracion 037. Si la migracion no esta
+  // aplicada, el INSERT fallara con check-constraint y registrarValidacion
+  // atrapa el error (es best-effort). El flujo del validador NO se rompe.
+  metodo: "qr" | "manual" | "apellido" | "email";
   resultado: "vigente" | "no_vigente" | "error";
   qrToken?: string | null;
   apoderadoId?: string | null;
@@ -116,10 +124,14 @@ export async function registrarValidacionDesdeHandler(
 export type FamiliaResumen = {
   apoderadoId: string;
   nombreMask: string;
-  // true si existe al menos un contacto con telefono valido para
-  // confirmar identidad por sus ultimos 4 digitos. false si no, para
-  // mostrar un aviso adecuado en la UI.
-  puedeConfirmar: boolean;
+  // true si existe al menos un contacto activo con telefono con >= 4
+  // digitos para confirmar por ultimos 4. false si no (socio historico
+  // sin telefono): la UI oculta esa opcion.
+  puedeConfirmarPorTelefono: boolean;
+  // true si existe al menos un contacto activo con email para confirmar
+  // identidad por el correo completo. Permite validar a socios que no
+  // tienen telefono registrado.
+  puedeConfirmarPorEmail: boolean;
 };
 
 export type BuscarResultado = {
@@ -175,23 +187,29 @@ export async function buscarFamiliaPorApellido(
   }
 
   // Consultamos los contactos para saber si al menos uno tiene telefono
-  // (NO devolvemos el telefono).
+  // y/o email. NO devolvemos ni el telefono ni el correo: solo flags.
   const { data: ctxData } = await supabase
     .from("contactos")
-    .select("apoderado_id, telefono")
+    .select("apoderado_id, telefono, email")
     .in("apoderado_id", ids)
     .eq("activo", true);
-  const porApod = new Map<string, boolean>();
-  for (const c of (ctxData as Array<{ apoderado_id: string; telefono: string | null }> | null) ??
-    []) {
+  const porApodTel = new Map<string, boolean>();
+  const porApodEmail = new Map<string, boolean>();
+  for (const c of (ctxData as Array<{
+    apoderado_id: string;
+    telefono: string | null;
+    email: string | null;
+  }> | null) ?? []) {
     const digitos = soloDigitos(c.telefono);
-    if (digitos.length >= 4) porApod.set(c.apoderado_id, true);
+    if (digitos.length >= 4) porApodTel.set(c.apoderado_id, true);
+    if (normalizarEmail(c.email)) porApodEmail.set(c.apoderado_id, true);
   }
 
   const familias: FamiliaResumen[] = subset.map((a) => ({
     apoderadoId: a.id,
     nombreMask: maskNombreFamilia(a.nombre),
-    puedeConfirmar: porApod.get(a.id) ?? false,
+    puedeConfirmarPorTelefono: porApodTel.get(a.id) ?? false,
+    puedeConfirmarPorEmail: porApodEmail.get(a.id) ?? false,
   }));
 
   console.log(
@@ -218,7 +236,7 @@ export type ConfirmarResultado =
       validUntil?: string;
       periodo?: number;
     }
-  | { ok: false; motivo: "no_disponible" | "digitos_invalidos" };
+  | { ok: false; motivo: "no_disponible" | "digitos_invalidos" | "email_invalido" };
 
 // Paso 2: confirma identidad y, si corresponde, devuelve la validez.
 // Compara los ultimos 4 digitos del telefono del operador con el
@@ -280,27 +298,113 @@ export async function confirmarIdentidadYValidar(
     }
   });
 
-  // Si no coincide, mismo resultado que "familia sin socio vigente":
-  // mensaje generico. No revelamos si el PIN estuvo mal o la familia no
-  // es socia.
   if (!match) {
-    // IMPORTANTE: pin_mismatch NO debe filtrar que la familia existe o no.
-    // Devolvemos valid=false sin estado explicito ni displayName (el UI
-    // mostrara el mensaje generico "credencial no vigente").
-    console.log(
-      "[validar] confirmar",
-      `actor=${actorKey(ctx)} apod=${apoderadoId} pin_mismatch`
-    );
-    await registrarValidacion({
-      ctx,
-      metodo: "apellido",
-      resultado: "no_vigente",
-      apoderadoId,
-    });
-    return { ok: true, valid: false };
+    return resolverTrasPinMismatch(ctx, apoderadoId, "apellido");
+  }
+  return resolverVigenciaYResponder(ctx, apoderadoId, "apellido");
+}
+
+// Alternativa B: confirmar por correo electronico completo. Reutiliza
+// el embudo apellido -> confirmar; aqui el "factor" es el correo. No
+// permite enumerar correos sin elegir familia primero.
+//
+// Reglas:
+//   - rate limit especifico (mas estricto que telefono).
+//   - email normalizado antes de comparar (lower+NFKC).
+//   - comparacion timing-safe contra TODOS los emails activos de la
+//     familia; no revelamos si fallo por email no coincide o por familia
+//     sin membresia (misma respuesta generica).
+//   - si no hay correos activos para esta familia, no_disponible.
+export async function confirmarIdentidadPorEmail(
+  apoderadoId: string,
+  email: string
+): Promise<ConfirmarResultado> {
+  const ctx = await requireValidador();
+  assertRateLimit(
+    await rateLimitKey("validar:confirmar-email", actorKey(ctx)),
+    RL_CONFIRMAR_EMAIL_MAX,
+    RL_CONFIRMAR_EMAIL_WIN_MS
+  );
+
+  const emailNorm = normalizarEmail(email);
+  if (!emailNorm) {
+    return { ok: false, motivo: "email_invalido" };
+  }
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      apoderadoId
+    )
+  ) {
+    return { ok: false, motivo: "email_invalido" };
   }
 
-  // Pin OK: resolvemos la vigencia como lo hace /api/socios/validar.
+  const supabase = createSupabaseAdminClient();
+
+  const { data: ctxData } = await supabase
+    .from("contactos")
+    .select("email")
+    .eq("apoderado_id", apoderadoId)
+    .eq("activo", true);
+  const emails = ((ctxData as Array<{ email: string | null }> | null) ?? [])
+    .map((c) => normalizarEmail(c.email))
+    .filter((e): e is string => !!e);
+
+  if (emails.length === 0) {
+    console.log(
+      "[validar] confirmar-email",
+      `actor=${actorKey(ctx)} apod=${apoderadoId} no_disponible`
+    );
+    return { ok: false, motivo: "no_disponible" };
+  }
+
+  const bufEsperado = Buffer.from(emailNorm);
+  const match = emails.some((e) => {
+    const be = Buffer.from(e);
+    if (be.length !== bufEsperado.length) return false;
+    try {
+      return crypto.timingSafeEqual(be, bufEsperado);
+    } catch {
+      return false;
+    }
+  });
+
+  if (!match) {
+    return resolverTrasPinMismatch(ctx, apoderadoId, "email");
+  }
+  return resolverVigenciaYResponder(ctx, apoderadoId, "email");
+}
+
+// ============ helpers de resolucion de vigencia ============
+
+// Flujo tras un factor que NO coincidio (telefono o correo): respuesta
+// generica indistinguible de "familia sin socio vigente", registro en
+// auditoria. NUNCA debe revelar si fue mismatch de factor o la familia
+// no es socia.
+async function resolverTrasPinMismatch(
+  ctx: ValidadorContexto,
+  apoderadoId: string,
+  metodo: "apellido" | "email"
+): Promise<ConfirmarResultado> {
+  console.log(
+    "[validar] confirmar",
+    `actor=${actorKey(ctx)} apod=${apoderadoId} metodo=${metodo} factor_mismatch`
+  );
+  await registrarValidacion({
+    ctx,
+    metodo,
+    resultado: "no_vigente",
+    apoderadoId,
+  });
+  return { ok: true, valid: false };
+}
+
+// Factor OK: resolver estado del socio y devolver vigencia o no-vigente.
+async function resolverVigenciaYResponder(
+  ctx: ValidadorContexto,
+  apoderadoId: string,
+  metodo: "apellido" | "email"
+): Promise<ConfirmarResultado> {
+  const supabase = createSupabaseAdminClient();
   const [{ data: cfgData }, { data: solData }, { data: apData }] =
     await Promise.all([
       supabase.from("socio_config").select("*").eq("id", 1).maybeSingle(),
@@ -322,7 +426,6 @@ export async function confirmarIdentidadYValidar(
     (apData as { nombre: string } | null)?.nombre ??
     "";
 
-  // Si no hay solicitud pagada/enviada en periodo vigente -> no vigente.
   const sol = solData as {
     apoderado_nombre: string;
     estado: string;
@@ -331,11 +434,11 @@ export async function confirmarIdentidadYValidar(
   if (!sol || sol.periodo_anio !== periodoVigente) {
     console.log(
       "[validar] confirmar",
-      `actor=${actorKey(ctx)} apod=${apoderadoId} ok_no_vigente`
+      `actor=${actorKey(ctx)} apod=${apoderadoId} metodo=${metodo} ok_no_vigente`
     );
     await registrarValidacion({
       ctx,
-      metodo: "apellido",
+      metodo,
       resultado: "no_vigente",
       apoderadoId,
     });
@@ -349,25 +452,13 @@ export async function confirmarIdentidadYValidar(
   }
 
   const hoy = new Date().toISOString().slice(0, 10);
-  if (config?.periodo_inicio && hoy < config.periodo_inicio) {
+  if (
+    (config?.periodo_inicio && hoy < config.periodo_inicio) ||
+    (config?.periodo_fin && hoy > config.periodo_fin)
+  ) {
     await registrarValidacion({
       ctx,
-      metodo: "apellido",
-      resultado: "no_vigente",
-      apoderadoId,
-    });
-    return {
-      ok: true,
-      valid: false,
-      estado: "membresia_no_vigente",
-      displayName: reducirNombre(nombreFamilia),
-      periodo: periodoVigente,
-    };
-  }
-  if (config?.periodo_fin && hoy > config.periodo_fin) {
-    await registrarValidacion({
-      ctx,
-      metodo: "apellido",
+      metodo,
       resultado: "no_vigente",
       apoderadoId,
     });
@@ -382,11 +473,11 @@ export async function confirmarIdentidadYValidar(
 
   console.log(
     "[validar] confirmar",
-    `actor=${actorKey(ctx)} apod=${apoderadoId} ok_vigente`
+    `actor=${actorKey(ctx)} apod=${apoderadoId} metodo=${metodo} ok_vigente`
   );
   await registrarValidacion({
     ctx,
-    metodo: "apellido",
+    metodo,
     resultado: "vigente",
     apoderadoId,
   });

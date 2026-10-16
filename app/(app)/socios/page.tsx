@@ -100,6 +100,9 @@ export default async function SociosPage({
           <Link href="/socios/config" className="btn-secondary text-sm">
             ⚙️ Configuración
           </Link>
+          <Link href="/socios/telefonos" className="btn-secondary text-sm">
+            📞 Teléfonos a regularizar
+          </Link>
           <Link
             href="/incorporacion"
             target="_blank"

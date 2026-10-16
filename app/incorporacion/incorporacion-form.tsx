@@ -14,6 +14,10 @@ import {
   type EstadoPostOtp,
 } from "./actions";
 import { OtpInput } from "./otp-input";
+import {
+  TelefonoCLInput,
+  componerTelefonoCL,
+} from "@/components/telefono-cl-input";
 
 // Flujo:
 //   email  -> solicitarOtp  -> otp  -> verificarOtp
@@ -59,10 +63,12 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
   const [codigo, setCodigo] = useState("");
   const [reenviarEnSeg, setReenviarEnSeg] = useState(0);
 
-  // Confirmar existente (caso B)
+  // Confirmar existente (caso B) — 9 digitos sin prefijo (el input ya
+  // muestra +56 fijo).
   const [telefono, setTelefono] = useState("");
 
-  // Flujo manual (caso C)
+  // Flujo manual (caso C). apoderado_telefono guarda 9 digitos sin
+  // prefijo, consistente con el componente TelefonoCLInput.
   const [manual, setManual] = useState({
     apoderado_nombre: "",
     apoderado_telefono: "",
@@ -212,6 +218,13 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     e.preventDefault();
     if (paso.nombre !== "confirmar_existente") return;
     setError(null);
+    const telefonoCanon = componerTelefonoCL(telefono);
+    if (!telefonoCanon) {
+      setError(
+        "Ingresa un teléfono celular válido: 9 dígitos empezando con 9 (ej. 955282630)."
+      );
+      return;
+    }
     const todosLosHijosIds = paso.estudiantes.map((e) => e.id);
     const emailActual = paso.email;
     startTransition(async () => {
@@ -219,7 +232,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         await crearSolicitudSocio({
           apoderado_id: paso.apoderadoId,
           apoderado_email: emailActual,
-          apoderado_telefono: telefono,
+          apoderado_telefono: telefonoCanon,
           estudiante_ids: todosLosHijosIds,
         });
       } catch (err) {
@@ -233,6 +246,13 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
     e.preventDefault();
     if (paso.nombre !== "manual") return;
     setError(null);
+    const telefonoCanon = componerTelefonoCL(manual.apoderado_telefono);
+    if (!telefonoCanon) {
+      setError(
+        "Ingresa un teléfono celular válido: 9 dígitos empezando con 9 (ej. 955282630)."
+      );
+      return;
+    }
     const emailActual = paso.email;
     startTransition(async () => {
       try {
@@ -240,7 +260,7 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           apoderado_nombre: manual.apoderado_nombre,
           apoderado_email: emailActual,
           apoderado_rut: manual.apoderado_rut,
-          apoderado_telefono: manual.apoderado_telefono,
+          apoderado_telefono: telefonoCanon,
           hijos,
         });
       } catch (err) {
@@ -538,27 +558,14 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           </div>
         </div>
 
-        <div>
-          <label
-            htmlFor="tel-existente"
-            className="block text-sm font-medium text-slate-700 mb-1.5"
-          >
-            Teléfono{" "}
-            <span className="text-xs text-slate-500 font-normal">
-              (opcional)
-            </span>
-          </label>
-          <input
-            id="tel-existente"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
-            placeholder="+56 9 1234 5678"
-            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
-          />
-        </div>
+        <TelefonoCLInput
+          id="tel-existente"
+          label="Teléfono celular"
+          value={telefono}
+          onChange={setTelefono}
+          required
+          helper="Lo usaremos para validar tu membresía con los últimos 4 dígitos. Formato: 9 dígitos empezando con 9."
+        />
 
         <div className="rounded-xl bg-brand-50 border border-brand-200 p-4">
           <div className="text-xs text-slate-600 uppercase tracking-wider font-medium">
@@ -597,7 +604,11 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
           </button>
           <button
             type="submit"
-            disabled={pending || totalHijos === 0}
+            disabled={
+              pending ||
+              totalHijos === 0 ||
+              componerTelefonoCL(telefono) === null
+            }
             className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
           >
             {pending ? "Procesando…" : "Continuar incorporación"}
@@ -679,29 +690,15 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
             placeholder="12.345.678-9"
           />
         </div>
-        <div>
-          <label
-            htmlFor="m-tel"
-            className="block text-sm font-medium text-slate-700 mb-1.5"
-          >
-            Teléfono{" "}
-            <span className="text-xs text-slate-500 font-normal">
-              (opcional)
-            </span>
-          </label>
-          <input
-            id="m-tel"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            className="w-full h-[52px] px-4 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition-colors focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
-            value={manual.apoderado_telefono}
-            onChange={(e) =>
-              setManual((m) => ({ ...m, apoderado_telefono: e.target.value }))
-            }
-            placeholder="+56 9 1234 5678"
-          />
-        </div>
+        <TelefonoCLInput
+          id="m-tel"
+          label="Teléfono celular"
+          value={manual.apoderado_telefono}
+          onChange={(d) =>
+            setManual((m) => ({ ...m, apoderado_telefono: d }))
+          }
+          required
+        />
       </div>
 
       <div className="border-t border-slate-200 pt-4 mt-5">
@@ -818,7 +815,10 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
         </button>
         <button
           type="submit"
-          disabled={pending}
+          disabled={
+            pending ||
+            componerTelefonoCL(manual.apoderado_telefono) === null
+          }
           className="flex-1 h-[52px] rounded-xl bg-brand-700 hover:bg-brand-900 text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:ring-offset-2"
         >
           {pending ? "Procesando…" : "Continuar al pago"}

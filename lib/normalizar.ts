@@ -76,3 +76,85 @@ export function soloDigitos(input: string | null | undefined): string {
   if (!input) return "";
   return input.replace(/\D/g, "");
 }
+
+/**
+ * Normaliza un telefono celular chileno al formato canonico +56XXXXXXXXX
+ * (prefijo +56 + 9 digitos empezando por 9).
+ *
+ * Reglas de aceptacion (en orden):
+ *   1. Normaliza unicode (NFKC) y limpia zero-width + espacios.
+ *   2. Deja solo digitos.
+ *   3. Si viene con prefijo pais 56 (ej. 56912345678), lo quita.
+ *   4. Si tras quitar prefijos quedan EXACTAMENTE 9 digitos y empieza
+ *      por 9, es valido -> devuelve "+56" + los 9 digitos.
+ *   5. Cualquier otra longitud/forma -> null (ambiguo o invalido).
+ *
+ * Ejemplos:
+ *   "+56 9 5528 2630"  -> "+56955282630"
+ *   "56955282630"      -> "+56955282630"
+ *   "955282630"        -> "+56955282630"
+ *   "9 5528 2630"      -> "+56955282630"
+ *   "22 345 6789"      -> null  (fijo, no cumple "empieza por 9")
+ *   "55282630"         -> null  (8 digitos, incompleto)
+ *   "+56 2 2345 6789"  -> null  (fijo chileno, no celular)
+ *   null | "" | " "    -> null
+ *
+ * Diseno conservador: no inventa. Si no se puede determinar sin ambiguedad
+ * que es un celular chileno de 9 digitos, devuelve null. Esto respeta
+ * el principio de no corromper datos historicos ambiguos durante backfills.
+ */
+export function normalizarTelefonoCL(
+  input: string | null | undefined
+): string | null {
+  if (!input) return null;
+  let s = input.normalize("NFKC").replace(ZERO_WIDTH_RE, "").trim();
+  if (!s) return null;
+  let digitos = s.replace(/\D/g, "");
+  if (digitos.length === 0) return null;
+  // Si empieza con 56 y queda largo compatible con +56 + 9 digitos, lo
+  // quitamos. 56 es prefijo pais Chile; cualquier otro caso lo dejamos
+  // tal cual para que el chequeo de longitud lo rechace.
+  if (digitos.length === 11 && digitos.startsWith("56")) {
+    digitos = digitos.slice(2);
+  }
+  // Formato celular chileno: 9 digitos iniciando por 9.
+  if (digitos.length !== 9) return null;
+  if (digitos[0] !== "9") return null;
+  return `+56${digitos}`;
+}
+
+/**
+ * True si el input, una vez normalizado, es un celular chileno valido.
+ * Thin wrapper sobre normalizarTelefonoCL para legibilidad en guards.
+ */
+export function esTelefonoCLValido(
+  input: string | null | undefined
+): boolean {
+  return normalizarTelefonoCL(input) !== null;
+}
+
+/**
+ * Clasifica un telefono para reportes de regularizacion. Util en el
+ * dry-run y en la vista administrativa:
+ *   - "ausente":      null/vacio.
+ *   - "valido":       ya esta en formato canonico +56XXXXXXXXX con 9 inicial.
+ *   - "normalizable": no esta en formato canonico, pero normalizarTelefonoCL
+ *                     devuelve un valor distinto no nulo.
+ *   - "invalido":     tiene contenido pero no se puede normalizar.
+ */
+export type ClasificacionTelefono =
+  | "ausente"
+  | "valido"
+  | "normalizable"
+  | "invalido";
+
+export function clasificarTelefonoCL(
+  input: string | null | undefined
+): ClasificacionTelefono {
+  if (!input) return "ausente";
+  const limpio = input.normalize("NFKC").replace(ZERO_WIDTH_RE, "").trim();
+  if (!limpio) return "ausente";
+  const norm = normalizarTelefonoCL(limpio);
+  if (!norm) return "invalido";
+  return limpio === norm ? "valido" : "normalizable";
+}

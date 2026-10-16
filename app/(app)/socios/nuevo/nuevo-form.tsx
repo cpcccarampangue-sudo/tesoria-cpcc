@@ -6,6 +6,11 @@ import type { SocioConfig } from "@/lib/types";
 import { precioVigente } from "@/lib/socios/precio";
 import { buscarFamiliasAdmin, crearSocioConPagoManual } from "../actions";
 import type { FamiliaCandidataAdmin } from "../tipos";
+import {
+  TelefonoCLInput,
+  componerTelefonoCL,
+} from "@/components/telefono-cl-input";
+import { normalizarTelefonoCL } from "@/lib/normalizar";
 
 type CuentaOp = { id: string; nombre: string; es_principal: boolean };
 
@@ -66,6 +71,14 @@ export function NuevoSocioForm({
     setEstudianteIds(new Set(f.estudiantes.map((e) => e.id)));
     const emailContacto = f.contactos.find((c) => c.email)?.email ?? "";
     setEmail(emailContacto);
+    // Pre-llenar con el telefono valido ya registrado si existe, para
+    // no obligar a la directiva a tipearlo de nuevo. El input muestra
+    // los 9 digitos (sin +56), y luego TelefonoCLInput lo compone de
+    // vuelta a E.164 al enviar.
+    const telefonoExistente = f.contactos
+      .map((c) => normalizarTelefonoCL(c.telefono))
+      .find((t) => t !== null);
+    setTelefono(telefonoExistente ? telefonoExistente.replace(/^\+56/, "") : "");
   }
 
   function toggleEstudiante(id: string) {
@@ -81,12 +94,19 @@ export function NuevoSocioForm({
     e.preventDefault();
     setError(null);
     if (paso.nombre !== "confirmar") return;
+    const telefonoCanon = componerTelefonoCL(telefono);
+    if (!telefonoCanon) {
+      setError(
+        "Ingresa un teléfono celular válido: 9 dígitos empezando con 9 (ej. 955282630)."
+      );
+      return;
+    }
     startTransition(async () => {
       try {
         const id = await crearSocioConPagoManual({
           apoderado_id: paso.familia.apoderado.id,
           apoderado_email: email,
-          apoderado_telefono: telefono,
+          apoderado_telefono: telefonoCanon,
           estudiante_ids: Array.from(estudianteIds),
           cuenta_id: pago.cuenta_id,
           fecha: pago.fecha,
@@ -229,20 +249,13 @@ export function NuevoSocioForm({
             Aquí llegará el QR si marcas &quot;enviar correo&quot;.
           </p>
         </div>
-        <div>
-          <label className="label">
-            Teléfono{" "}
-            <span className="text-xs text-slate-500 font-normal">
-              (opcional)
-            </span>
-          </label>
-          <input
-            className="input"
-            value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
-            placeholder="+56 9 1234 5678"
-          />
-        </div>
+        <TelefonoCLInput
+          label="Teléfono celular"
+          value={telefono}
+          onChange={setTelefono}
+          required
+          helper="Necesario para que la familia pueda validarse por últimos 4 dígitos. Si ya tenía uno registrado, lo precargamos."
+        />
       </div>
 
       <div className="border-t border-slate-200 pt-3">
@@ -350,7 +363,11 @@ export function NuevoSocioForm({
         <button
           type="submit"
           className="btn-primary flex-1"
-          disabled={pending || seleccionados.length === 0}
+          disabled={
+            pending ||
+            seleccionados.length === 0 ||
+            componerTelefonoCL(telefono) === null
+          }
         >
           {pending ? "Procesando..." : "✓ Incorporar socio + registrar pago"}
         </button>
