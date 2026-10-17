@@ -709,6 +709,13 @@ export type EstadoPostOtp =
       apoderadoId: string;
       apoderadoNombre: string;
       estudiantes: Array<{ id: string; nombre: string; curso: string | null }>;
+      // Si el contacto que corresponde al email verificado ya tiene un
+      // telefono valido en formato CL (+56XXXXXXXXX), se precarga para
+      // que el apoderado no deba reescribirlo. Igualmente se exige al
+      // confirmar: el valor viaja al cliente para que el input lo
+      // muestre, el usuario puede editarlo, y el server revalida.
+      // null si no hay telefono valido asociado al email verificado.
+      telefonoActualDigitos: string | null;
     }
   | { caso: "nuevo"; email: string };
 
@@ -734,6 +741,17 @@ export async function estadoPostOtp(): Promise<EstadoPostOtp> {
       return { caso: "ya_socio", qrToken: familia.yaSocioToken };
     }
 
+    // Precargar telefono si el contacto que corresponde al email
+    // verificado por OTP tiene uno valido. Buscamos UNICAMENTE en el
+    // contacto cuyo email coincide exactamente con el verificado:
+    // no mezclamos padre/madre. Si no coincide o no es canonico,
+    // dejamos null y el usuario tiene que ingresarlo.
+    const contactoMatch = familia.contactos.find(
+      (c) => normalizarEmail(c.email) === sesion.email && c.activo
+    );
+    const telefonoActualCanon = contactoMatch
+      ? normalizarTelefonoCL(contactoMatch.telefono)
+      : null;
     return {
       caso: "familia_existente",
       email: sesion.email,
@@ -744,6 +762,9 @@ export async function estadoPostOtp(): Promise<EstadoPostOtp> {
         nombre: e.nombre,
         curso: e.curso ?? null,
       })),
+      telefonoActualDigitos: telefonoActualCanon
+        ? telefonoActualCanon.replace(/^\+56/, "")
+        : null,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";

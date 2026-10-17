@@ -916,14 +916,19 @@ export async function vincularSolicitudConApoderado(
     .maybeSingle();
   if (!apoderadoData) throw new Error("Familia no encontrada.");
 
-  // Leer el periodo de la solicitud a vincular
+  // Leer el periodo de la solicitud a vincular + telefono para
+  // propagarlo al contacto correspondiente de la familia.
   const { data: solData } = await supabase
     .from("socio_solicitudes")
-    .select("periodo_anio, apoderado_email")
+    .select("periodo_anio, apoderado_email, apoderado_telefono")
     .eq("id", solicitudId)
     .maybeSingle();
   const sol = solData as
-    | { periodo_anio: number; apoderado_email: string }
+    | {
+        periodo_anio: number;
+        apoderado_email: string;
+        apoderado_telefono: string | null;
+      }
     | null;
   if (!sol) throw new Error("Solicitud no encontrada.");
 
@@ -956,6 +961,23 @@ export async function vincularSolicitudConApoderado(
     })
     .eq("id", solicitudId);
   if (error) throw new Error(error.message);
+
+  // Propagar telefono de la solicitud al contacto del mismo email de
+  // la familia vinculada (si existe uno activo con ese email). Esto
+  // asegura que el dato obligatorio no quede unicamente en la solicitud.
+  // Mismo criterio que la incorporacion caso B: UPDATE sin crear
+  // contactos nuevos ni cruzar personas.
+  const telefonoNorm = normalizarTelefonoCL(sol.apoderado_telefono);
+  const emailNorm = normalizarEmail(sol.apoderado_email);
+  if (telefonoNorm && emailNorm) {
+    await supabase
+      .from("contactos")
+      .update({ telefono: telefonoNorm })
+      .eq("apoderado_id", apoderadoId)
+      .eq("activo", true)
+      .ilike("email", emailNorm);
+  }
+
   revalidatePath("/socios");
   revalidatePath(`/socios/${solicitudId}`);
 }

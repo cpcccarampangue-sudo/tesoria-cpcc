@@ -109,6 +109,11 @@ export function IncorporacionForm({ config }: { config: SocioConfig }) {
       return;
     }
     if (s.caso === "familia_existente") {
+      // Precargar el telefono si la familia ya tiene uno valido
+      // asociado al email verificado. Igualmente se exige al confirmar
+      // (requerido por el input, validado por el server) — la precarga
+      // solo evita que el apoderado reescriba un dato correcto.
+      setTelefono(s.telefonoActualDigitos ?? "");
       setPaso({
         nombre: "confirmar_existente",
         email: s.email,
