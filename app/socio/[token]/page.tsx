@@ -1,11 +1,7 @@
 import Image from "next/image";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type {
-  Estudiante,
-  SocioConfig,
-  SocioSolicitud,
-} from "@/lib/types";
+import type { SocioConfig, SocioSolicitud } from "@/lib/types";
 import { INSTITUCION_NOMBRE } from "@/lib/config";
 import { AppFooter } from "@/components/app-footer";
 import { generarQrDataUrl, urlPublicaSocio } from "@/lib/qr";
@@ -47,35 +43,35 @@ export default async function SocioPublicoPage({
 
   const apoderadoId = resuelto.apoderadoId;
 
-  // Buscar solicitud vigente del periodo activo + apoderado + hijos.
-  const [{ data: solVigente }, { data: apData }, { data: estData }] =
-    await Promise.all([
-      admin
-        .from("socio_solicitudes")
-        .select("*")
-        .eq("apoderado_id", apoderadoId)
-        .eq("periodo_anio", periodoVigente)
-        .in("estado", ["pagada", "enviada"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      admin
-        .from("apoderados")
-        .select("id, nombre")
-        .eq("id", apoderadoId)
-        .maybeSingle(),
-      admin
-        .from("estudiantes")
-        .select("*")
-        .eq("apoderado_id", apoderadoId)
-        .eq("activo", true)
-        .order("nombre"),
-    ]);
+  // Minimización de datos: la página pública /socio/{token} es anónima
+  // (su único control es que el token UUID v4 es impredecible). Para
+  // reducir superficie si un link se filtra, mostramos lo mínimo:
+  // estado, período, nombre reducido y la vigencia. NO exponemos lista
+  // de hijos, cursos, fecha de pago exacta ni nombre completo.
+  const [{ data: solVigente }, { data: apData }] = await Promise.all([
+    admin
+      .from("socio_solicitudes")
+      .select("estado, periodo_anio")
+      .eq("apoderado_id", apoderadoId)
+      .eq("periodo_anio", periodoVigente)
+      .in("estado", ["pagada", "enviada"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    admin
+      .from("apoderados")
+      .select("id, nombre")
+      .eq("id", apoderadoId)
+      .maybeSingle(),
+  ]);
 
-  const solicitud = solVigente as SocioSolicitud | null;
+  const solicitud = solVigente as Pick<
+    SocioSolicitud,
+    "estado" | "periodo_anio"
+  > | null;
   const apoderado = apData as { id: string; nombre: string } | null;
-  const hijos = (estData as Estudiante[] | null) ?? [];
-  const nombreFamilia = apoderado?.nombre ?? solicitud?.apoderado_nombre ?? "";
+  const nombreApoderadoCompleto = apoderado?.nombre ?? "";
+  const nombreReducido = reducirNombre(nombreApoderadoCompleto);
 
   // Ventana temporal del periodo activo.
   const hoy = new Date().toISOString().slice(0, 10);
@@ -91,7 +87,7 @@ export default async function SocioPublicoPage({
       ? `El período ${periodoVigente} comienza el ${config!.periodo_inicio}.`
       : despuesDeFin
       ? `El período ${periodoVigente} finalizó el ${config!.periodo_fin}.`
-      : `Esta familia está registrada, pero aún no ha renovado su membresía para el período ${periodoVigente}.`;
+      : `Esta credencial está registrada, pero aún no se ha renovado la membresía para el período ${periodoVigente}.`;
 
     return (
       <PaginaBase>
@@ -100,9 +96,9 @@ export default async function SocioPublicoPage({
           <div className="text-xl font-bold text-amber-900">
             Membresía no vigente
           </div>
-          {nombreFamilia && (
+          {nombreReducido !== "—" && (
             <div className="text-sm text-slate-700">
-              Familia: <strong>{nombreFamilia}</strong>
+              Credencial: <strong>{nombreReducido}</strong>
             </div>
           )}
           <p className="text-sm text-amber-900">{motivoFueraVentana}</p>
@@ -118,6 +114,10 @@ export default async function SocioPublicoPage({
   const qrDataUrl = await generarQrDataUrl(urlPublicaSocio(token), {
     size: 500,
   });
+  const vigenciaHasta = formatearVigencia(
+    config?.periodo_fin ?? null,
+    periodoVigente
+  );
 
   return (
     <PaginaBase>
@@ -142,51 +142,51 @@ export default async function SocioPublicoPage({
           </div>
         )}
 
-        <div className="pt-3 border-t border-green-200 space-y-2 text-sm text-slate-800">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 pt-3 border-t border-green-200 text-sm text-slate-800">
           <div>
-            <span className="text-xs uppercase text-slate-500">Familia</span>
-            <div className="font-semibold">{nombreFamilia}</div>
+            <dt className="text-xs uppercase text-slate-500">Credencial</dt>
+            <dd className="font-semibold">{nombreReducido}</dd>
           </div>
           <div>
-            <span className="text-xs uppercase text-slate-500">
-              {hijos.length > 1 ? "Alumnos" : "Alumno"}
-            </span>
-            {hijos.length > 0 ? (
-              <ul className="mt-1 space-y-0.5">
-                {hijos.map((h) => (
-                  <li key={h.id} className="font-medium">
-                    {h.nombre}
-                    {h.curso && (
-                      <span className="text-slate-500 font-normal">
-                        {" · "}
-                        {h.curso}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="font-medium">
-                {solicitud?.alumno_nombre ?? "—"}
-                {solicitud?.curso && (
-                  <span className="text-slate-500 font-normal">
-                    {" · "}
-                    {solicitud.curso}
-                  </span>
-                )}
-              </div>
-            )}
+            <dt className="text-xs uppercase text-slate-500">Categoría</dt>
+            <dd className="font-semibold">Apoderado</dd>
           </div>
-        </div>
-        {solicitud?.pagada_en && (
-          <p className="text-xs text-green-800 pt-2 border-t border-green-200">
-            Cuota {periodoVigente} pagada el{" "}
-            {new Date(solicitud.pagada_en).toLocaleDateString("es-CL")}
-          </p>
-        )}
+          <div>
+            <dt className="text-xs uppercase text-slate-500">Vigencia</dt>
+            <dd className="font-semibold">{vigenciaHasta}</dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase text-slate-500">Período</dt>
+            <dd className="font-semibold">{periodoVigente}</dd>
+          </div>
+        </dl>
       </div>
     </PaginaBase>
   );
+}
+
+// Nombre reducido: "María Angélica Pérez" -> "María P.". Mismo criterio
+// que /api/socios/validar — minimiza info personal en vistas públicas.
+function reducirNombre(nombre: string): string {
+  const partes = nombre
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length > 0);
+  if (partes.length === 0) return "—";
+  if (partes.length === 1) return partes[0];
+  const primero = partes[0];
+  const siguiente = partes[1];
+  const inicial = siguiente[0]?.toUpperCase() ?? "";
+  return inicial ? `${primero} ${inicial}.` : primero;
+}
+
+function formatearVigencia(
+  periodoFin: string | null,
+  periodo: number
+): string {
+  const iso = periodoFin ?? `${periodo}-12-31`;
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function PaginaBase({ children }: { children: React.ReactNode }) {

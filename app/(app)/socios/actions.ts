@@ -598,10 +598,22 @@ export async function crearSocioConPagoManual(
     .eq("activo", true)
     .ilike("email", email);
 
-  // 4. QR permanente por familia: asegurar apoderados.qr_token
-  //    (reutiliza si ya tenia, genera si no). Es el QR que ira al correo.
+  // 4. QR permanente por familia: asegurar apoderados.qr_token (reutiliza
+  //    si ya tenia, genera si no). Esta es la incorporación administrativa
+  //    confirmada = uno de los dos puntos autorizados de generación del
+  //    canónico. Luego sincronizar socio_solicitudes.qr_token al canónico
+  //    para que el correo-QR salga apuntando al token permanente de la
+  //    familia (no al UUID generado por el DEFAULT al INSERTar la solicitud).
   try {
-    await obtenerOGenerarQrFamilia(supabase, input.apoderado_id);
+    const canon = await obtenerOGenerarQrFamilia(supabase, input.apoderado_id);
+    // Solicitud recién creada → email_enviado_en IS NULL por defecto.
+    // El filtro extra la mantiene segura si por alguna razón ya se envió.
+    await supabase
+      .from("socio_solicitudes")
+      .update({ qr_token: canon })
+      .eq("id", solData.id)
+      .is("email_enviado_en", null)
+      .neq("qr_token", canon);
   } catch (err) {
     console.error(
       "Error asignando qr_token al apoderado tras alta manual:",
@@ -730,10 +742,22 @@ export async function registrarPagoManualSocio(
   if (error) throw new Error(error.message);
 
   // Asegurar qr_token permanente del apoderado (si la solicitud estaba
-  // vinculada a uno).
+  // vinculada a uno). Es el punto autorizado de generación del canónico
+  // en el flujo de pago manual admin — equivalente al que ejecuta la
+  // RPC reconciliar_pago_socio_core para pagos via SumUp.
   if (solicitud.apoderado_id) {
     try {
-      await obtenerOGenerarQrFamilia(supabase, solicitud.apoderado_id);
+      const canon = await obtenerOGenerarQrFamilia(supabase, solicitud.apoderado_id);
+      // Sincronizar la solicitud al canónico sólo si aún no envió correo.
+      // Preserva links legacy ya enviados y evita cambiar el token de una
+      // solicitud cuyo correo-QR ya está en la bandeja del apoderado.
+      // Idempotente: si la solicitud ya tiene el canónico, no afecta filas.
+      await supabase
+        .from("socio_solicitudes")
+        .update({ qr_token: canon })
+        .eq("id", input.solicitud_id)
+        .is("email_enviado_en", null)
+        .neq("qr_token", canon);
     } catch (err) {
       console.error(
         "Error asignando qr_token al apoderado tras registrar pago manual:",
