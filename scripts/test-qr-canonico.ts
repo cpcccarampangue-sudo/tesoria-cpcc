@@ -48,7 +48,7 @@ function check(desc: string, pass: boolean, extra = "") {
 async function main() {
   console.log(`# test-qr-canonico  ${new Date().toISOString()}\n`);
 
-  console.log("## T2/T5/T6  RPC reconciliar_pago_socio_core en PROD");
+  console.log("## T2/T5/T6  RPC reconciliar_pago_socio_core en PROD (post-039)");
   const defR = await execSql(`
     select pg_get_functiondef(p.oid) as def
     from pg_proc p
@@ -57,18 +57,12 @@ async function main() {
       and p.proname = 'reconciliar_pago_socio_core'
   `);
   const def = (defR.rows[0] as { def: string }).def;
+  // La 039 ELIMINÓ la sincronización que la 038 había introducido porque
+  // rompía UNIQUE en segundas renovaciones.
   check(
-    "T2  RPC incluye SET qr_token = v_canon_token (sincronización 038)",
-    /SET qr_token = v_canon_token/.test(def),
+    "T2  RPC NO contiene la sincronización 038 (rompía UNIQUE)",
+    !/SET qr_token = v_canon_token/.test(def),
     def.length ? `def=${def.length}B` : "no se leyó la función"
-  );
-  check(
-    "T2  Sincronización condicionada a email_enviado_en IS NULL",
-    /email_enviado_en IS NULL/i.test(def)
-  );
-  check(
-    "T2  Sincronización es idempotente (DISTINCT FROM)",
-    /qr_token IS DISTINCT FROM v_canon_token/i.test(def)
   );
   check(
     "T5  RPC conserva generación on-first-pay (gen_random_uuid())",
@@ -134,23 +128,40 @@ async function main() {
     /origen: "canonico"/.test(srcQrFamilia) && /origen: "legacy"/.test(srcQrFamilia)
   );
 
-  console.log("\n## T7  Server actions sincronizan al canónico post-pago");
+  console.log(
+    "\n## T7  Server actions: generan canónico sin sincronizar la solicitud"
+  );
   const srcSocios = readFileSync("app/(app)/socios/actions.ts", "utf8");
   check(
-    "T7  registrarPagoManualSocio: sincroniza qr_token tras obtener canónico",
-    /registrarPagoManualSocio[\s\S]{0,3500}obtenerOGenerarQrFamilia[\s\S]{0,500}\.update\(\{\s*qr_token: canon/.test(
+    "T7  registrarPagoManualSocio: llama obtenerOGenerarQrFamilia",
+    /registrarPagoManualSocio[\s\S]{0,3500}obtenerOGenerarQrFamilia/.test(
       srcSocios
     )
   );
   check(
-    "T7  crearSocioConPagoManual: sincroniza qr_token tras obtener canónico",
-    /crearSocioConPagoManual[\s\S]{0,8000}obtenerOGenerarQrFamilia[\s\S]{0,500}\.update\(\{\s*qr_token: canon/.test(
+    "T7  crearSocioConPagoManual: llama obtenerOGenerarQrFamilia",
+    /crearSocioConPagoManual[\s\S]{0,8000}obtenerOGenerarQrFamilia/.test(
       srcSocios
     )
   );
   check(
-    "T7  Ambas sincronizaciones condicionadas a email_enviado_en IS NULL",
-    (srcSocios.match(/is\("email_enviado_en", null\)/g) ?? []).length >= 2
+    "T7  Server actions NO ejecutan UPDATE socio_solicitudes SET qr_token (UNIQUE lo rompería)",
+    !/\.update\(\{\s*qr_token:/.test(srcSocios)
+  );
+
+  console.log(
+    "\n## T7b  enviarCorreoQrSocio usa apoderados.qr_token (vía obtenerOGenerarQrFamilia)"
+  );
+  const srcEnviarQr = readFileSync("lib/socios/enviar-qr.ts", "utf8");
+  check(
+    "T7b  enviar-qr llama obtenerOGenerarQrFamilia para construir la URL del correo",
+    /qrTokenPublico = await obtenerOGenerarQrFamilia/.test(srcEnviarQr)
+  );
+  check(
+    "T7b  Fallback a s.qr_token solo cuando apoderado_id es null",
+    /if \(s\.apoderado_id\)[\s\S]{0,120}obtenerOGenerarQrFamilia[\s\S]{0,200}else[\s\S]{0,120}s\.qr_token/.test(
+      srcEnviarQr
+    )
   );
 
   console.log("\n## T8  /socio/[token] minimiza datos sin autenticación");
